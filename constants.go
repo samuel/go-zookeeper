@@ -46,7 +46,8 @@ const (
 
 	// stateAuthFailed = -113??
 
-	stateUnassociated = 99
+	stateConnected  = 100
+	stateHasSession = 101
 )
 
 const (
