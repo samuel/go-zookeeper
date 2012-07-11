@@ -16,7 +16,7 @@ type acl struct {
 	Id    id
 }
 
-type stat struct {
+type Stat struct {
 	Czxid          int64
 	Mzxid          int64
 	Ctime          int64
@@ -87,7 +87,7 @@ type pathResponse struct {
 
 type statResponse struct {
 	responseHeader
-	Stat stat
+	Stat Stat
 }
 
 //
@@ -135,7 +135,7 @@ type getAclRequest pathRequest
 type getAclResponse struct {
 	responseHeader
 	Acl  []acl
-	Stat stat
+	Stat Stat
 }
 
 type getChildrenRequest pathRequest
@@ -150,7 +150,7 @@ type getChildren2Request pathWatchRequest
 type getChildren2Response struct {
 	responseHeader
 	Children []string
-	Stat     stat
+	Stat     Stat
 }
 
 type getDataRequest pathWatchRequest
@@ -158,7 +158,7 @@ type getDataRequest pathWatchRequest
 type getDataResponse struct {
 	responseHeader
 	Data []byte
-	Stat stat
+	Stat Stat
 }
 
 type getMaxChildrenRequest pathRequest

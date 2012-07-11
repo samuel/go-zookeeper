@@ -112,3 +112,21 @@ var (
 		opWatcherEvent: "watcherEvent",
 	}
 )
+
+type EventType int
+
+func (t EventType) String() string {
+	switch t {
+	case eventTypeNone:
+		return "None"
+	case eventTypeNodeCreated:
+		return "NodeCreated"
+	case eventTypeNodeDeleted:
+		return "NodeDeleted"
+	case eventTypeNodeDataChanged:
+		return "NodeDataChanged"
+	case eventTypeNodeChildrenChanged:
+		return "ChildrenChanged"
+	}
+	return "Unknown"
+}
