@@ -1,26 +1,36 @@
 package zk
 
-// TODO: ping server
-// TODO: everything
+// TODO: make sure a ping response comes back in a reasonable time
 
 import (
 	"encoding/binary"
+	"errors"
 	"io"
 	"log"
 	"net"
+	"strconv"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
 )
 
-type state int
+var (
+	ErrConnectionClosed = errors.New("zk: connection closed")
+	ErrSessionExpired   = errors.New("zk: session expired")
+)
+
+type watcher struct {
+	eventType EventType
+	ch        chan Event
+}
 
 type Conn struct {
 	servers        []string
 	serverIndex    int
 	conn           net.Conn
-	state          state
-	eventChan      <-chan Event
+	state          State
+	eventChan      chan Event
 	pingInterval   time.Duration
 	recvTimeout    time.Duration
 	connectTimeout time.Duration
@@ -28,6 +38,8 @@ type Conn struct {
 	sendChan     chan *request
 	requests     map[int32]*request // Xid -> pending request
 	requestsLock sync.Mutex
+	closeChan    chan bool
+	watchers     map[string][]*watcher
 
 	xid       int32
 	lastZxid  int64
@@ -45,12 +57,17 @@ type request struct {
 
 type Event struct {
 	Type  EventType
-	State int    // One of the STATE_* constants.
+	State State
 	Path  string // For non-session events, the path of the watched node.
 }
 
 func Connect(servers []string, recvTimeout time.Duration) (*Conn, <-chan Event, error) {
-	ec := make(<-chan Event, 5)
+	for i, addr := range servers {
+		if !strings.Contains(":", addr) {
+			servers[i] = addr + ":" + strconv.Itoa(defaultPort)
+		}
+	}
+	ec := make(chan Event, 5)
 	conn := Conn{
 		servers:        servers,
 		serverIndex:    0,
@@ -62,6 +79,9 @@ func Connect(servers []string, recvTimeout time.Duration) (*Conn, <-chan Event, 
 		connectTimeout: 1 * time.Second,
 		sendChan:       make(chan *request),
 		requests:       make(map[int32]*request),
+		watchers:       make(map[string][]*watcher),
+		passwd:         emptyPassword,
+		timeout:        30000,
 	}
 	go conn.loop()
 	return &conn, ec, nil
@@ -74,8 +94,12 @@ func (c *Conn) connect() {
 		if err == nil {
 			c.conn = zkConn
 			c.state = stateConnected
+			c.closeChan = make(chan bool)
 			return
 		}
+
+		log.Printf("Failed to connect to %s: %+v", c.servers[c.serverIndex], err)
+
 		c.serverIndex = (c.serverIndex + 1) % len(c.servers)
 		if c.serverIndex == startIndex {
 			time.Sleep(time.Second)
@@ -85,18 +109,29 @@ func (c *Conn) connect() {
 
 func (c *Conn) loop() {
 	for {
-		if c.conn != nil {
-			c.conn.Close()
-		}
-		c.conn = nil
 		c.state = stateDisconnected
 
 		c.connect()
-		c.handler()
+		err := c.handler()
+		if err == nil {
+			panic("zk: handler should never return nil error")
+		}
+		c.conn.Close()
+		close(c.closeChan)
+
+		log.Println(err)
+
+		c.requestsLock.Lock()
+		// Error out any pending requests
+		for _, req := range c.requests {
+			req.recvChan <- err
+		}
+		c.requests = make(map[int32]*request)
+		c.requestsLock.Unlock()
 	}
 }
 
-func (c *Conn) handler() {
+func (c *Conn) handler() error {
 	buf := make([]byte, 1024)
 
 	// connect request
@@ -104,21 +139,19 @@ func (c *Conn) handler() {
 	n, err := encodePacket(buf[4:], &connectRequest{
 		ProtocolVersion: protocolVersion,
 		LastZxidSeen:    c.lastZxid,
-		TimeOut:         30000,
+		TimeOut:         c.timeout,
 		SessionId:       c.sessionId,
-		Passwd:          emptyPassword,
+		Passwd:          c.passwd,
 	})
 	if err != nil {
-		log.Println(err)
-		return
+		return err
 	}
 
 	binary.BigEndian.PutUint32(buf[:4], uint32(n))
 
 	_, err = c.conn.Write(buf[:n+4])
 	if err != nil {
-		log.Println(err)
-		return
+		return err
 	}
 
 	// connect response
@@ -126,8 +159,7 @@ func (c *Conn) handler() {
 	// package length
 	_, err = io.ReadFull(c.conn, buf[:4])
 	if err != nil {
-		log.Println(err)
-		return
+		return err
 	}
 
 	blen := int(binary.BigEndian.Uint32(buf[:4]))
@@ -137,13 +169,24 @@ func (c *Conn) handler() {
 
 	_, err = io.ReadFull(c.conn, buf[:blen])
 	if err != nil {
-		log.Println(err)
-		return
+		return err
 	}
 
 	r := connectResponse{}
-	decodePacket(buf[:blen], r)
-	// TODO: Check for a dead session
+	_, err = decodePacket(buf[:blen], &r)
+	if err != nil {
+		return err
+	}
+	if r.SessionId == 0 {
+		c.sessionId = 0
+		c.passwd = emptyPassword
+		c.state = stateExpired
+		c.eventChan <- Event{
+			State: stateExpired,
+		}
+		return ErrSessionExpired
+	}
+
 	c.timeout = r.TimeOut
 	c.sessionId = r.SessionId
 	c.passwd = r.Passwd
@@ -153,9 +196,31 @@ func (c *Conn) handler() {
 
 	// Send loop
 	go func() {
+		closeChan := c.closeChan
+		pingTicker := time.NewTicker(c.pingInterval)
+		defer pingTicker.Stop()
 		buf := make([]byte, 1024)
 		for {
-			req := <-c.sendChan
+			var req *request
+			select {
+			case req = <-c.sendChan:
+			case <-pingTicker.C:
+				n, err := encodePacket(buf[4:], &pingRequest{requestHeader{Xid: -2, Opcode: opPing}})
+				if err != nil {
+					panic("zk: opPing should never fail to serialize")
+				}
+
+				binary.BigEndian.PutUint32(buf[:4], uint32(n))
+
+				_, err = c.conn.Write(buf[:n+4])
+				if err != nil {
+					c.conn.Close()
+					return
+				}
+				continue
+			case <-closeChan:
+				return
+			}
 			n, err := encodePacket(buf[4:], req.pkt)
 			if err != nil {
 				req.recvChan <- err
@@ -163,15 +228,23 @@ func (c *Conn) handler() {
 			}
 			binary.BigEndian.PutUint32(buf[:4], uint32(n))
 
-			c.requestsLock.Lock()
-			c.requests[req.xid] = req
-			c.requestsLock.Unlock()
-
 			_, err = c.conn.Write(buf[:n+4])
 			if err != nil {
 				req.recvChan <- err
+				c.conn.Close()
 				return
 			}
+
+			c.requestsLock.Lock()
+			select {
+			case <-closeChan:
+				req.recvChan <- ErrConnectionClosed
+				c.requestsLock.Unlock()
+				return
+			default:
+			}
+			c.requests[req.xid] = req
+			c.requestsLock.Unlock()
 		}
 	}()
 
@@ -180,8 +253,7 @@ func (c *Conn) handler() {
 		// package length
 		_, err = io.ReadFull(c.conn, buf[:4])
 		if err != nil {
-			log.Println(err)
-			return
+			return err
 		}
 
 		blen := int(binary.BigEndian.Uint32(buf[:4]))
@@ -191,18 +263,16 @@ func (c *Conn) handler() {
 
 		_, err = io.ReadFull(c.conn, buf[:blen])
 		if err != nil {
-			log.Println(err)
-			return
+			return err
 		}
 
 		res := responseHeader{}
-		_, err := decodePacket(buf[:16], &res)
+		_, err = decodePacket(buf[:16], &res)
 		if err != nil {
-			// TODO
-			panic(err)
+			return err
 		}
 
-		log.Printf("Response xid=%d zxid=%d err=%d\n", res.Xid, res.Zxid, res.Err)
+		// log.Printf("Response xid=%d zxid=%d err=%d\n", res.Xid, res.Zxid, res.Err)
 
 		if res.Zxid > 0 {
 			c.lastZxid = res.Zxid
@@ -212,9 +282,23 @@ func (c *Conn) handler() {
 			res := &watcherEvent{}
 			_, err := decodePacket(buf[:blen], res)
 			if err != nil {
-				panic(err)
+				return err
 			}
-			log.Printf("%+v\n", res)
+			ev := Event{
+				Type:  res.Type,
+				State: res.State,
+				Path:  res.Path,
+			}
+			c.eventChan <- ev
+			if watchers := c.watchers[res.Path]; watchers != nil {
+				for _, w := range watchers {
+					if w.eventType == res.Type {
+						w.ch <- ev
+					}
+				}
+			}
+		} else if res.Xid == -2 {
+			// Ping response. Ignore.
 		} else {
 			c.requestsLock.Lock()
 			req, ok := c.requests[res.Xid]
@@ -231,6 +315,9 @@ func (c *Conn) handler() {
 			}
 		}
 	}
+
+	// Shouldn't ever get here
+	panic("zk: handler should never reach the end")
 }
 
 func (c *Conn) nextXid() int32 {
@@ -261,7 +348,7 @@ func (c *Conn) Children(path string) (children []string, stat *Stat, err error) 
 	return
 }
 
-func (c *Conn) ChildrenW(path string) (children []string, stat *Stat, err error) {
+func (c *Conn) ChildrenW(path string) ([]string, *Stat, chan Event, error) {
 	xid := c.nextXid()
 	ch := make(chan error)
 	rs := &getChildren2Response{}
@@ -279,8 +366,16 @@ func (c *Conn) ChildrenW(path string) (children []string, stat *Stat, err error)
 		recvChan:   ch,
 	}
 	c.sendChan <- req
-	err = <-ch
-	children = rs.Children
-	stat = &rs.Stat
-	return
+	err := <-ch
+	var ech chan Event
+	if err == nil {
+		ech = make(chan Event, 1)
+		watchers := c.watchers[path]
+		if watchers == nil {
+			watchers = make([]*watcher, 0)
+		}
+		c.watchers[path] = append(watchers, &watcher{eventTypeNodeChildrenChanged, ech})
+
+	}
+	return rs.Children, &rs.Stat, ech, err
 }

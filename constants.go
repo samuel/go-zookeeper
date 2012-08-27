@@ -2,6 +2,8 @@ package zk
 
 const (
 	protocolVersion = 0
+
+	defaultPort = 2181
 )
 
 const (
@@ -49,6 +51,18 @@ const (
 	stateConnected  = 100
 	stateHasSession = 101
 )
+
+type State int32
+
+func (s State) String() string {
+	switch s {
+	case stateDisconnected:
+		return "Disconnected"
+	case stateSyncConnected:
+		return "SyncConnected"
+	}
+	return "Unknown"
+}
 
 const (
 	errOk = 0
@@ -113,7 +127,7 @@ var (
 	}
 )
 
-type EventType int
+type EventType int32
 
 func (t EventType) String() string {
 	switch t {

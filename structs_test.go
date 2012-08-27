@@ -9,7 +9,7 @@ func TestEncodeDecodePacket(t *testing.T) {
 	encodeDecodeTest(t, &requestHeader{-2, 5})
 	encodeDecodeTest(t, &connectResponse{1, 2, 3, nil})
 	encodeDecodeTest(t, &connectResponse{1, 2, 3, []byte{4, 5, 6}})
-	encodeDecodeTest(t, &getAclResponse{responseHeader{1, 2, 3}, []acl{acl{12, id{"s", 23}}}, stat{}})
+	encodeDecodeTest(t, &getAclResponse{responseHeader{1, 2, 3}, []acl{acl{12, id{"s", 23}}}, Stat{}})
 	encodeDecodeTest(t, &getChildrenResponse{responseHeader{1, 2, 3}, []string{"foo", "bar"}})
 	encodeDecodeTest(t, &pathWatchRequest{requestHeader{1, 2}, "path", true})
 	encodeDecodeTest(t, &pathWatchRequest{requestHeader{1, 2}, "path", false})

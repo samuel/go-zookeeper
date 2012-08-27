@@ -227,8 +227,8 @@ type syncResponse pathResponse
 
 type watcherEvent struct {
 	responseHeader
-	Type  int32
-	State int32
+	Type  EventType
+	State State
 	Path  string
 }
 
