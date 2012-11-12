@@ -63,7 +63,7 @@ type Event struct {
 
 func Connect(servers []string, recvTimeout time.Duration) (*Conn, <-chan Event, error) {
 	for i, addr := range servers {
-		if !strings.Contains(":", addr) {
+		if !strings.Contains(addr, ":") {
 			servers[i] = addr + ":" + strconv.Itoa(defaultPort)
 		}
 	}
