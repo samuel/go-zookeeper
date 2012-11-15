@@ -58,7 +58,7 @@ const (
 	StateConnectedReadOnly = State(5)
 	StateSaslAuthenticated = State(6)
 	StateExpired           = State(-112)
-	StateAuthFailed        = State(-113)
+	// StateAuthFailed        = State(-113)
 
 	StateConnected  = State(100)
 	StateHasSession = State(101)
@@ -69,7 +69,6 @@ var (
 		StateUnknown:           "StateUnknown",
 		StateDisconnected:      "StateDisconnected",
 		StateSyncConnected:     "StateSyncConnected",
-		StateAuthFailed:        "StateAuthFailed",
 		StateConnectedReadOnly: "StateConnectedReadOnly",
 		StateSaslAuthenticated: "StateSaslAuthenticated",
 		StateExpired:           "StateExpired",

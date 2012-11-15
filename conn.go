@@ -15,6 +15,10 @@ import (
 	"time"
 )
 
+const (
+	bufferSize = 1536 * 1024
+)
+
 var (
 	ErrConnectionClosed = errors.New("zk: connection closed")
 	ErrSessionExpired   = errors.New("zk: session expired")
@@ -139,7 +143,7 @@ func (c *Conn) loop() {
 }
 
 func (c *Conn) handler() error {
-	buf := make([]byte, 1024)
+	buf := make([]byte, bufferSize)
 
 	// connect request
 
@@ -205,11 +209,35 @@ func (c *Conn) handler() error {
 		closeChan := c.closeChan
 		pingTicker := time.NewTicker(c.pingInterval)
 		defer pingTicker.Stop()
-		buf := make([]byte, 1024)
+		buf := make([]byte, bufferSize)
 		for {
-			var req *request
 			select {
-			case req = <-c.sendChan:
+			case req := <-c.sendChan:
+				n, err := encodePacket(buf[4:], req.pkt)
+				if err != nil {
+					req.recvChan <- err
+					continue
+				}
+
+				binary.BigEndian.PutUint32(buf[:4], uint32(n))
+
+				_, err = c.conn.Write(buf[:n+4])
+				if err != nil {
+					req.recvChan <- err
+					c.conn.Close()
+					return
+				}
+
+				c.requestsLock.Lock()
+				select {
+				case <-closeChan:
+					req.recvChan <- ErrConnectionClosed
+					c.requestsLock.Unlock()
+					return
+				default:
+				}
+				c.requests[req.xid] = req
+				c.requestsLock.Unlock()
 			case <-pingTicker.C:
 				n, err := encodePacket(buf[4:], &pingRequest{requestHeader{Xid: -2, Opcode: opPing}})
 				if err != nil {
@@ -223,34 +251,9 @@ func (c *Conn) handler() error {
 					c.conn.Close()
 					return
 				}
-				continue
 			case <-closeChan:
 				return
 			}
-			n, err := encodePacket(buf[4:], req.pkt)
-			if err != nil {
-				req.recvChan <- err
-				continue
-			}
-			binary.BigEndian.PutUint32(buf[:4], uint32(n))
-
-			_, err = c.conn.Write(buf[:n+4])
-			if err != nil {
-				req.recvChan <- err
-				c.conn.Close()
-				return
-			}
-
-			c.requestsLock.Lock()
-			select {
-			case <-closeChan:
-				req.recvChan <- ErrConnectionClosed
-				c.requestsLock.Unlock()
-				return
-			default:
-			}
-			c.requests[req.xid] = req
-			c.requestsLock.Unlock()
 		}
 	}()
 
