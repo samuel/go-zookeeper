@@ -72,7 +72,7 @@ func Connect(servers []string, recvTimeout time.Duration) (*Conn, <-chan Event, 
 		servers:        servers,
 		serverIndex:    0,
 		conn:           nil,
-		state:          stateDisconnected,
+		state:          StateDisconnected,
 		eventChan:      ec,
 		recvTimeout:    recvTimeout,
 		pingInterval:   10 * time.Second,
@@ -87,15 +87,19 @@ func Connect(servers []string, recvTimeout time.Duration) (*Conn, <-chan Event, 
 	return &conn, ec, nil
 }
 
+func (c *Conn) Close() {
+	// TODO
+}
+
 func (c *Conn) connect() {
 	startIndex := c.serverIndex
 	for {
 		zkConn, err := net.DialTimeout("tcp", c.servers[c.serverIndex], c.connectTimeout)
 		if err == nil {
 			c.conn = zkConn
-			c.state = stateConnected
+			c.state = StateConnected
 			c.closeChan = make(chan bool)
-			// c.eventChan <- Event{}
+			c.eventChan <- Event{EventSession, c.state, ""}
 			return
 		}
 
@@ -110,8 +114,6 @@ func (c *Conn) connect() {
 
 func (c *Conn) loop() {
 	for {
-		c.state = stateDisconnected
-
 		c.connect()
 		err := c.handler()
 		if err == nil {
@@ -119,6 +121,9 @@ func (c *Conn) loop() {
 		}
 		c.conn.Close()
 		close(c.closeChan)
+
+		c.state = StateDisconnected
+		c.eventChan <- Event{EventSession, c.state, ""}
 
 		log.Println(err)
 
@@ -181,19 +186,18 @@ func (c *Conn) handler() error {
 	if r.SessionId == 0 {
 		c.sessionId = 0
 		c.passwd = emptyPassword
-		c.state = stateExpired
-		c.eventChan <- Event{
-			State: stateExpired,
-		}
+		c.state = StateExpired
+		c.eventChan <- Event{EventSession, c.state, ""}
 		return ErrSessionExpired
 	}
 
 	c.timeout = r.TimeOut
 	c.sessionId = r.SessionId
 	c.passwd = r.Passwd
-	c.state = stateHasSession
+	c.state = StateHasSession
 	// if new session
 	c.xid = 0
+	c.eventChan <- Event{EventSession, c.state, ""}
 
 	// Send loop
 	go func() {
@@ -375,7 +379,7 @@ func (c *Conn) ChildrenW(path string) ([]string, *Stat, chan Event, error) {
 		if watchers == nil {
 			watchers = make([]*watcher, 0)
 		}
-		c.watchers[path] = append(watchers, &watcher{eventTypeNodeChildrenChanged, ech})
+		c.watchers[path] = append(watchers, &watcher{EventNodeChildrenChanged, ech})
 
 	}
 	return rs.Children, &rs.Stat, ech, err

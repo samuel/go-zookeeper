@@ -29,37 +29,61 @@ const (
 )
 
 const (
-	eventTypeNone                = -1
-	eventTypeNodeCreated         = 1
-	eventTypeNodeDeleted         = 2
-	eventTypeNodeDataChanged     = 3
-	eventTypeNodeChildrenChanged = 4
+	EventNodeCreated         = EventType(1)
+	EventNodeDeleted         = EventType(2)
+	EventNodeDataChanged     = EventType(3)
+	EventNodeChildrenChanged = EventType(4)
+
+	EventSession     = EventType(-1)
+	EventNotWatching = EventType(-2)
+)
+
+var (
+	eventNames = map[EventType]string{
+		EventNodeCreated:         "EventNodeCreated",
+		EventNodeDeleted:         "EventNodeDeleted",
+		EventNodeDataChanged:     "EventNodeDataChanged",
+		EventNodeChildrenChanged: "EventNodeChildrenchanged",
+		EventSession:             "EventSession",
+		EventNotWatching:         "EventNotWatching",
+	}
 )
 
 const (
-	stateUnknown           = -1
-	stateDisconnected      = 0
-	stateNoSyncConnected   = 1 // deprecated, unused, never generated
-	stateSyncConnected     = 3
-	stateAuthFailed        = 4
-	stateConnectedReadOnly = 5
-	stateSaslAuthenticated = 6
-	stateExpired           = -112
+	StateUnknown      = State(-1)
+	StateDisconnected = State(0)
+	// StateNoSyncConnected   = State(1) // deprecated, unused, never generated
+	StateSyncConnected     = State(3)
+	StateAuthFailed        = State(4)
+	StateConnectedReadOnly = State(5)
+	StateSaslAuthenticated = State(6)
+	StateExpired           = State(-112)
 
 	// stateAuthFailed = -113??
 
-	stateConnected  = 100
-	stateHasSession = 101
+	StateConnected  = State(100)
+	StateHasSession = State(101)
+)
+
+var (
+	stateNames = map[State]string{
+		StateUnknown:           "StateUnknown",
+		StateDisconnected:      "StateDisconnected",
+		StateSyncConnected:     "StateSyncConnected",
+		StateAuthFailed:        "StateAuthFailed",
+		StateConnectedReadOnly: "StateConnectedReadOnly",
+		StateSaslAuthenticated: "StateSaslAuthenticated",
+		StateExpired:           "StateExpired",
+		StateConnected:         "StateConnected",
+		StateHasSession:        "StateHasSession",
+	}
 )
 
 type State int32
 
 func (s State) String() string {
-	switch s {
-	case stateDisconnected:
-		return "Disconnected"
-	case stateSyncConnected:
-		return "SyncConnected"
+	if name := stateNames[s]; name != "" {
+		return name
 	}
 	return "Unknown"
 }
@@ -130,17 +154,8 @@ var (
 type EventType int32
 
 func (t EventType) String() string {
-	switch t {
-	case eventTypeNone:
-		return "None"
-	case eventTypeNodeCreated:
-		return "NodeCreated"
-	case eventTypeNodeDeleted:
-		return "NodeDeleted"
-	case eventTypeNodeDataChanged:
-		return "NodeDataChanged"
-	case eventTypeNodeChildrenChanged:
-		return "ChildrenChanged"
+	if name := eventNames[t]; name != "" {
+		return name
 	}
 	return "Unknown"
 }
