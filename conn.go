@@ -95,6 +95,7 @@ func (c *Conn) connect() {
 			c.conn = zkConn
 			c.state = stateConnected
 			c.closeChan = make(chan bool)
+			// c.eventChan <- Event{}
 			return
 		}
 
@@ -378,4 +379,28 @@ func (c *Conn) ChildrenW(path string) ([]string, *Stat, chan Event, error) {
 
 	}
 	return rs.Children, &rs.Stat, ech, err
+}
+
+func (c *Conn) Get(path string) (data []byte, stat *Stat, err error) {
+	xid := c.nextXid()
+	ch := make(chan error)
+	rs := &getDataResponse{}
+	req := &request{
+		xid: xid,
+		pkt: &getDataRequest{
+			requestHeader: requestHeader{
+				Xid:    xid,
+				Opcode: opGetData,
+			},
+			Path:  path,
+			Watch: false,
+		},
+		recvStruct: rs,
+		recvChan:   ch,
+	}
+	c.sendChan <- req
+	err = <-ch
+	data = rs.Data
+	stat = &rs.Stat
+	return
 }
