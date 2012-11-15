@@ -93,6 +93,7 @@ func (c *Conn) Close() {
 
 func (c *Conn) connect() {
 	startIndex := c.serverIndex
+	c.state = StateConnecting
 	for {
 		zkConn, err := net.DialTimeout("tcp", c.servers[c.serverIndex], c.connectTimeout)
 		if err == nil {
