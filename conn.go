@@ -351,45 +351,30 @@ func (c *Conn) nextXid() int32 {
 	return atomic.AddInt32(&c.xid, 1)
 }
 
-func (c *Conn) Children(path string) (children []string, stat *Stat, err error) {
-	xid := c.nextXid()
+func (c *Conn) request(opcode int32, req interface{}, res interface{}) error {
 	ch := make(chan error)
-	rs := &getChildren2Response{}
-	req := &request{
-		xid:    xid,
-		opcode: opGetChildren2,
-		pkt: &getChildren2Request{
-			Path:  path,
-			Watch: false,
-		},
-		recvStruct: rs,
+	rq := &request{
+		xid:        c.nextXid(),
+		opcode:     opcode,
+		pkt:        req,
+		recvStruct: res,
 		recvChan:   ch,
 	}
-	c.sendChan <- req
-	err = <-ch
-	if err == nil {
-		children = rs.Children
-		stat = &rs.Stat
-	}
-	return
+	c.sendChan <- rq
+	return <-ch
+}
+
+func (c *Conn) Children(path string) ([]string, *Stat, error) {
+	res := &getChildren2Response{}
+	err := c.request(opGetChildren2, &getChildren2Request{Path: path, Watch: false}, res)
+	return res.Children, &res.Stat, err
 }
 
 func (c *Conn) ChildrenW(path string) ([]string, *Stat, chan Event, error) {
-	xid := c.nextXid()
-	ch := make(chan error)
-	rs := &getChildren2Response{}
-	req := &request{
-		xid:    xid,
-		opcode: opGetChildren2,
-		pkt: &getChildren2Request{
-			Path:  path,
-			Watch: true,
-		},
-		recvStruct: rs,
-		recvChan:   ch,
-	}
-	c.sendChan <- req
-	err := <-ch
+	res := &getChildren2Response{}
+	err := c.request(opGetChildren2, &getChildren2Request{Path: path, Watch: true}, res)
+
+	// TODO: This is totally borked. Not safe.. not reliable..
 	var ech chan Event
 	if err == nil {
 		ech = make(chan Event, 1)
@@ -399,94 +384,28 @@ func (c *Conn) ChildrenW(path string) ([]string, *Stat, chan Event, error) {
 		}
 		c.watchers[path] = append(watchers, &watcher{EventNodeChildrenChanged, ech})
 	}
-	return rs.Children, &rs.Stat, ech, err
+	return res.Children, &res.Stat, ech, err
 }
 
-func (c *Conn) Get(path string) (data []byte, stat *Stat, err error) {
-	xid := c.nextXid()
-	ch := make(chan error)
-	rs := &getDataResponse{}
-	req := &request{
-		xid:    xid,
-		opcode: opGetData,
-		pkt: &getDataRequest{
-			Path:  path,
-			Watch: false,
-		},
-		recvStruct: rs,
-		recvChan:   ch,
-	}
-	c.sendChan <- req
-	err = <-ch
-	if err == nil {
-		data = rs.Data
-		stat = &rs.Stat
-	}
-	return
+func (c *Conn) Get(path string) ([]byte, *Stat, error) {
+	res := &getDataResponse{}
+	err := c.request(opGetData, &getDataRequest{Path: path, Watch: false}, res)
+	return res.Data, &res.Stat, err
 }
 
-func (c *Conn) Set(path string, data []byte) (stat *Stat, err error) {
-	xid := c.nextXid()
-	ch := make(chan error)
-	rs := &setDataResponse{}
-	req := &request{
-		xid:    xid,
-		opcode: opSetData,
-		pkt: &setDataRequest{
-			Path:    path,
-			Data:    data,
-			Version: -1,
-		},
-		recvStruct: rs,
-		recvChan:   ch,
-	}
-	c.sendChan <- req
-	err = <-ch
-	if err == nil {
-		stat = &rs.Stat
-	}
-	return
+func (c *Conn) Set(path string, data []byte, version int32) (*Stat, error) {
+	res := &setDataResponse{}
+	err := c.request(opSetData, &setDataRequest{path, data, version}, res)
+	return &res.Stat, err
 }
 
-func (c *Conn) Create(path string, data []byte, flags int32, acl []ACL) (rpath string, err error) {
-	xid := c.nextXid()
-	ch := make(chan error)
-	rs := &createResponse{}
-	req := &request{
-		xid:    xid,
-		opcode: opCreate,
-		pkt: &createRequest{
-			Path:  path,
-			Data:  data,
-			Acl:   acl,
-			Flags: flags,
-		},
-		recvStruct: rs,
-		recvChan:   ch,
-	}
-	c.sendChan <- req
-	err = <-ch
-	if err == nil {
-		rpath = rs.Path
-	}
-	return
+func (c *Conn) Create(path string, data []byte, flags int32, acl []ACL) (string, error) {
+	res := &createResponse{}
+	err := c.request(opCreate, &createRequest{path, data, acl, flags}, res)
+	return res.Path, err
 }
 
-func (c *Conn) Delete(path string, version int32) (err error) {
-	xid := c.nextXid()
-	ch := make(chan error)
-	rs := &deleteResponse{}
-	req := &request{
-		xid:    xid,
-		opcode: opDelete,
-		pkt: &deleteRequest{
-			Path:    path,
-			Version: version,
-		},
-		recvStruct: rs,
-		recvChan:   ch,
-	}
-	c.sendChan <- req
-	err = <-ch
-	return
+func (c *Conn) Delete(path string, version int32) error {
+	res := &deleteResponse{}
+	return c.request(opDelete, &deleteRequest{path, version}, res)
 }

@@ -18,4 +18,11 @@ func TestCreate(t *testing.T) {
 	} else if path != "/gozk-test" {
 		t.Fatalf("Create returned different path '%s' != '/gozk-test'", path)
 	}
+	if children, stat, err := zk.Children("/"); err != nil {
+		t.Fatalf("Children returned error: %+v", err)
+	} else if stat == nil {
+		t.Fatal("Children returned nil stat")
+	} else if len(children) < 1 {
+		t.Fatal("Children should return at least 1 child")
+	}
 }
