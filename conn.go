@@ -8,6 +8,8 @@ import (
 	"io"
 	"log"
 	"net"
+	// "os"
+	"fmt"
 	"strconv"
 	"strings"
 	"sync"
@@ -95,9 +97,10 @@ func (c *Conn) Close() {
 	// TODO
 }
 
-func (c *Conn) connect() {
+func (c *Conn) connect() error {
 	startIndex := c.serverIndex
 	c.state = StateConnecting
+	count := 0
 	for {
 		zkConn, err := net.DialTimeout("tcp", c.servers[c.serverIndex], c.connectTimeout)
 		if err == nil {
@@ -105,16 +108,21 @@ func (c *Conn) connect() {
 			c.state = StateConnected
 			c.closeChan = make(chan bool)
 			c.eventChan <- Event{EventSession, c.state, ""}
-			return
+			return nil
 		}
-
-		log.Printf("Failed to connect to %s: %+v", c.servers[c.serverIndex], err)
+		// disabled to stop noise, after 5 failures this error with percolate up
+		// log.Printf("zk: Failed to connect to %s: %+v", c.servers[c.serverIndex], err)
+		if count > 5 {
+			return errors.New("zk: Can't connect")
+		}
+		count++
 
 		c.serverIndex = (c.serverIndex + 1) % len(c.servers)
 		if c.serverIndex == startIndex {
 			time.Sleep(time.Second)
 		}
 	}
+	return errors.New("zk: Can't connect 2")
 }
 
 func (c *Conn) loop() {
@@ -142,24 +150,36 @@ func (c *Conn) loop() {
 	}
 }
 
-func (c *Conn) handler() error {
-	buf := make([]byte, bufferSize)
+func (c *Conn) handler() (e error) {
+	defer func() {
+		if r := recover(); r != nil {
+			e = errors.New("UNKWNREQ: handler: " + fmt.Sprintf("%v", r))
+			// fmt.Println("Recovered in f", r)
+		}
+	}()
+
+	buf := make([]byte, 1024)
 
 	// connect request
-
-	n, err := encodePacket(buf[4:], &connectRequest{
+	re := connectRequest{
 		ProtocolVersion: protocolVersion,
 		LastZxidSeen:    c.lastZxid,
 		TimeOut:         c.timeout,
 		SessionId:       c.sessionId,
 		Passwd:          c.passwd,
-	})
+	}
+	n, err := encodePacket(buf[4:], &re)
+	// log.Printf(">>>>>>>>>>>>>> handler n is %+v\n", n)
+	// log.Printf(">>>>>>>>>>>>>> re before is %+v\n", re)
+	// log.Printf(">>>>>>>>>>>>>> buf is %+v\n", buf)
 	if err != nil {
 		return err
 	}
 
 	binary.BigEndian.PutUint32(buf[:4], uint32(n))
 
+	// log.Printf(">>>>>>>>>>>>>> re after is %+v\n", re)
+	// log.Printf(">>>>>>>>>>>>>> buf after %+v\n", buf)
 	_, err = c.conn.Write(buf[:n+4])
 	if err != nil {
 		return err
@@ -188,6 +208,9 @@ func (c *Conn) handler() error {
 	if err != nil {
 		return err
 	}
+	// log.Printf(">>>>>>>>>>>>>> r is %+v\n", r)
+	// log.Printf(">>>>>>>>>>>>>> buf[:blen] is %+v\n", buf[:blen])
+
 	if r.SessionId == 0 {
 		c.sessionId = 0
 		c.passwd = emptyPassword
@@ -206,6 +229,7 @@ func (c *Conn) handler() error {
 
 	// Send loop
 	go func() {
+		// log.Println("SENDING REQUEST TO ZK---------------------------------------------------------")
 		closeChan := c.closeChan
 		pingTicker := time.NewTicker(c.pingInterval)
 		defer pingTicker.Stop()
@@ -213,6 +237,9 @@ func (c *Conn) handler() error {
 		for {
 			select {
 			case req := <-c.sendChan:
+				// log.Printf("--------- ++++++ -----> c.sendChan req is =>%+v\n", req)
+				// log.Printf("--------- ++++++ -----> req =>%+v\n", req)
+				// log.Printf("--------- ++++++ -----> req.pkt =>%+v\n", req.pkt)
 				n, err := encodePacket(buf[4:], req.pkt)
 				if err != nil {
 					req.recvChan <- err
@@ -220,6 +247,12 @@ func (c *Conn) handler() error {
 				}
 
 				binary.BigEndian.PutUint32(buf[:4], uint32(n))
+
+				// these are the ones
+				// log.Printf("--------- +||||+ -----> req =>%+v\n", req)
+				// log.Printf("--------- +||||+ -----> req.pkt =>%+v\n", req.pkt)
+				// log.Printf("--------- +||||+ -----> n =>%+v\n", n)
+				// log.Printf("--------- +||||+ -----> buf =>%+v\n", buf)
 
 				_, err = c.conn.Write(buf[:n+4])
 				if err != nil {
@@ -237,6 +270,9 @@ func (c *Conn) handler() error {
 				default:
 				}
 				c.requests[req.xid] = req
+				// log.Printf("--------- ++++++ -----> req is =>%+v\n", req)
+				// log.Printf("--------- ++++++ -----> req.pkt is =>%+v\n", req.pkt)
+				// log.Printf("--------- ++++++ -----> c.requests is =>%+v\n", c.requests)
 				c.requestsLock.Unlock()
 			case <-pingTicker.C:
 				n, err := encodePacket(buf[4:], &pingRequest{requestHeader{Xid: -2, Opcode: opPing}})
@@ -259,7 +295,9 @@ func (c *Conn) handler() error {
 
 	// Receive loop
 	for {
+		// log.Println("READING RESPONSE FROM ZK------------------------------------------------------")
 		// package length
+		// log.Printf("--------------< buf =>%+v\n", buf)
 		_, err = io.ReadFull(c.conn, buf[:4])
 		if err != nil {
 			return err
@@ -281,6 +319,7 @@ func (c *Conn) handler() error {
 			return err
 		}
 
+		// log.Printf("READING RESPONSE HEADER %+v\n: ", res)
 		// log.Printf("Response xid=%d zxid=%d err=%d\n", res.Xid, res.Zxid, res.Err)
 
 		if res.Zxid > 0 {
@@ -310,6 +349,9 @@ func (c *Conn) handler() error {
 			// Ping response. Ignore.
 		} else {
 			c.requestsLock.Lock()
+			// log.Println("in res.Xid default")
+			// res.Xid = -1 // testing
+			// log.Println(c.requests)
 			req, ok := c.requests[res.Xid]
 			if ok {
 				delete(c.requests, res.Xid)
@@ -318,6 +360,7 @@ func (c *Conn) handler() error {
 
 			if !ok {
 				log.Printf("Response for unknown request with xid %d", res.Xid)
+				req.recvChan <- errors.New("UNKWNREQ: Response for unknown request with xid " + string(res.Xid))
 			} else {
 				_, err := decodePacket(buf[:blen], req.recvStruct)
 				req.recvChan <- err
@@ -331,6 +374,75 @@ func (c *Conn) handler() error {
 
 func (c *Conn) nextXid() int32 {
 	return atomic.AddInt32(&c.xid, 1)
+}
+
+func (c *Conn) Set(path string, data []byte) (stat *Stat, err error) {
+	// log.Println("---> in Set")
+	// log.Println(string(data))
+	xid := c.nextXid()
+	ch := make(chan error)
+	rs := &setDataResponse{}
+	req := &request{
+		xid: xid,
+		pkt: &setDataRequest{
+			requestHeader: requestHeader{
+				Xid:    xid,
+				Opcode: opSetData,
+			},
+			Path:    path,
+			Data:    data,
+			Version: -1,
+		},
+		recvStruct: rs,
+		recvChan:   ch,
+	}
+	// log.Println("----------set request------------------------")
+	// log.Printf("%+v\n", req)
+	// log.Printf("%+v\n", req.pkt)
+	c.sendChan <- req
+	err = <-ch
+	stat = &rs.Stat
+	// log.Println("----------set response------------------------")
+	// log.Printf("%+v\n", rs)
+	// log.Printf("err:%+v\n", err)
+	// log.Printf("stat:%+v\n", *stat)
+	// log.Println("<--- out Set")
+	return
+}
+
+func (c *Conn) Create(path string, data []byte) (rpath *string, err error) {
+	log.Println("---> in Create")
+	log.Println(string(data))
+	xid := c.nextXid()
+	ch := make(chan error)
+	rs := &createResponse{}
+	req := &request{
+		xid: xid,
+		pkt: &createRequest{
+			requestHeader: requestHeader{
+				Xid:    xid,
+				Opcode: opCreate,
+			},
+			Path:  path,
+			Data:  data,
+			Acl:   []acl{acl{0x1f, id{"world", 0}}},
+			Flags: 0,
+		},
+		recvStruct: rs,
+		recvChan:   ch,
+	}
+	log.Println("----------create request------------------------")
+	log.Printf("%+v\n", req)
+	log.Printf("%+v\n", req.pkt)
+	c.sendChan <- req
+	err = <-ch
+	rpath = &rs.Path
+	log.Println("----------create response------------------------")
+	log.Printf("%+v\n", rs)
+	log.Printf("err:%+v\n", err)
+	log.Printf("rpath:%+v\n", *rpath)
+	log.Println("<--- out Create")
+	return
 }
 
 func (c *Conn) Children(path string) (children []string, stat *Stat, err error) {
@@ -390,6 +502,8 @@ func (c *Conn) ChildrenW(path string) ([]string, *Stat, chan Event, error) {
 }
 
 func (c *Conn) Get(path string) (data []byte, stat *Stat, err error) {
+	// log.Println("---> in Get")
+	// log.Println(string(data))
 	xid := c.nextXid()
 	ch := make(chan error)
 	rs := &getDataResponse{}
@@ -406,9 +520,17 @@ func (c *Conn) Get(path string) (data []byte, stat *Stat, err error) {
 		recvStruct: rs,
 		recvChan:   ch,
 	}
+	// log.Println("----------get request------------------------")
+	// log.Printf("%+v\n", req)
+	// log.Printf("%+v\n", req.pkt)
 	c.sendChan <- req
 	err = <-ch
 	data = rs.Data
 	stat = &rs.Stat
+	// log.Println("----------get response------------------------")
+	// log.Printf("%+v\n", rs)
+	// log.Printf("err:%+v\n", err)
+	// log.Printf("stat:%+v\n", *stat)
+	// log.Println("<--- out Get")
 	return
 }
