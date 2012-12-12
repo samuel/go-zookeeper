@@ -54,6 +54,7 @@ type Conn struct {
 
 type request struct {
 	xid        int32
+	opcode     int32
 	pkt        interface{}
 	recvStruct interface{}
 	recvChan   chan error
@@ -217,11 +218,20 @@ func (c *Conn) handler() error {
 		for {
 			select {
 			case req := <-c.sendChan:
-				n, err := encodePacket(buf[4:], req.pkt)
+				header := &requestHeader{req.xid, req.opcode}
+				n, err := encodePacket(buf[4:], header)
+				if err != nil {
+					req.recvChan <- err
+					return
+				}
+
+				n2, err := encodePacket(buf[4+n:], req.pkt)
 				if err != nil {
 					req.recvChan <- err
 					continue
 				}
+
+				n += n2
 
 				binary.BigEndian.PutUint32(buf[:4], uint32(n))
 
@@ -243,7 +253,7 @@ func (c *Conn) handler() error {
 				c.requests[req.xid] = req
 				c.requestsLock.Unlock()
 			case <-pingTicker.C:
-				n, err := encodePacket(buf[4:], &pingRequest{requestHeader{Xid: -2, Opcode: opPing}})
+				n, err := encodePacket(buf[4:], &requestHeader{Xid: -2, Opcode: opPing})
 				if err != nil {
 					panic("zk: opPing should never fail to serialize")
 				}
@@ -293,7 +303,7 @@ func (c *Conn) handler() error {
 
 		if res.Xid == -1 {
 			res := &watcherEvent{}
-			_, err := decodePacket(buf[:blen], res)
+			_, err := decodePacket(buf[16:16+blen], res)
 			if err != nil {
 				return err
 			}
@@ -323,7 +333,10 @@ func (c *Conn) handler() error {
 			if !ok {
 				log.Printf("Response for unknown request with xid %d", res.Xid)
 			} else {
-				_, err := decodePacket(buf[:blen], req.recvStruct)
+				_, err := decodePacket(buf[16:16+blen], req.recvStruct)
+				if err == nil {
+					err = res.Err.toError()
+				}
 				req.recvChan <- err
 			}
 		}
@@ -342,12 +355,9 @@ func (c *Conn) Children(path string) (children []string, stat *Stat, err error) 
 	ch := make(chan error)
 	rs := &getChildren2Response{}
 	req := &request{
-		xid: xid,
+		xid:    xid,
+		opcode: opGetChildren2,
 		pkt: &getChildren2Request{
-			requestHeader: requestHeader{
-				Xid:    xid,
-				Opcode: opGetChildren2,
-			},
 			Path:  path,
 			Watch: false,
 		},
@@ -356,9 +366,6 @@ func (c *Conn) Children(path string) (children []string, stat *Stat, err error) 
 	}
 	c.sendChan <- req
 	err = <-ch
-	if err == nil {
-		err = rs.responseHeader.Err.toError()
-	}
 	if err == nil {
 		children = rs.Children
 		stat = &rs.Stat
@@ -371,12 +378,9 @@ func (c *Conn) ChildrenW(path string) ([]string, *Stat, chan Event, error) {
 	ch := make(chan error)
 	rs := &getChildren2Response{}
 	req := &request{
-		xid: xid,
+		xid:    xid,
+		opcode: opGetChildren2,
 		pkt: &getChildren2Request{
-			requestHeader: requestHeader{
-				Xid:    xid,
-				Opcode: opGetChildren2,
-			},
 			Path:  path,
 			Watch: true,
 		},
@@ -386,9 +390,6 @@ func (c *Conn) ChildrenW(path string) ([]string, *Stat, chan Event, error) {
 	c.sendChan <- req
 	err := <-ch
 	var ech chan Event
-	if err == nil {
-		err = rs.responseHeader.Err.toError()
-	}
 	if err == nil {
 		ech = make(chan Event, 1)
 		watchers := c.watchers[path]
@@ -406,12 +407,9 @@ func (c *Conn) Get(path string) (data []byte, stat *Stat, err error) {
 	ch := make(chan error)
 	rs := &getDataResponse{}
 	req := &request{
-		xid: xid,
+		xid:    xid,
+		opcode: opGetData,
 		pkt: &getDataRequest{
-			requestHeader: requestHeader{
-				Xid:    xid,
-				Opcode: opGetData,
-			},
 			Path:  path,
 			Watch: false,
 		},
@@ -420,9 +418,6 @@ func (c *Conn) Get(path string) (data []byte, stat *Stat, err error) {
 	}
 	c.sendChan <- req
 	err = <-ch
-	if err == nil {
-		err = rs.responseHeader.Err.toError()
-	}
 	if err == nil {
 		data = rs.Data
 		stat = &rs.Stat
@@ -435,12 +430,9 @@ func (c *Conn) Set(path string, data []byte) (stat *Stat, err error) {
 	ch := make(chan error)
 	rs := &setDataResponse{}
 	req := &request{
-		xid: xid,
+		xid:    xid,
+		opcode: opSetData,
 		pkt: &setDataRequest{
-			requestHeader: requestHeader{
-				Xid:    xid,
-				Opcode: opSetData,
-			},
 			Path:    path,
 			Data:    data,
 			Version: -1,
@@ -450,9 +442,6 @@ func (c *Conn) Set(path string, data []byte) (stat *Stat, err error) {
 	}
 	c.sendChan <- req
 	err = <-ch
-	if err == nil {
-		err = rs.responseHeader.Err.toError()
-	}
 	if err == nil {
 		stat = &rs.Stat
 	}
@@ -464,12 +453,9 @@ func (c *Conn) Create(path string, data []byte, flags int32, acl []ACL) (rpath s
 	ch := make(chan error)
 	rs := &createResponse{}
 	req := &request{
-		xid: xid,
+		xid:    xid,
+		opcode: opCreate,
 		pkt: &createRequest{
-			requestHeader: requestHeader{
-				Xid:    xid,
-				Opcode: opCreate,
-			},
 			Path:  path,
 			Data:  data,
 			Acl:   acl,
@@ -481,9 +467,6 @@ func (c *Conn) Create(path string, data []byte, flags int32, acl []ACL) (rpath s
 	c.sendChan <- req
 	err = <-ch
 	if err == nil {
-		err = rs.responseHeader.Err.toError()
-	}
-	if err == nil {
 		rpath = rs.Path
 	}
 	return
@@ -494,12 +477,9 @@ func (c *Conn) Delete(path string, version int32) (err error) {
 	ch := make(chan error)
 	rs := &deleteResponse{}
 	req := &request{
-		xid: xid,
+		xid:    xid,
+		opcode: opDelete,
 		pkt: &deleteRequest{
-			requestHeader: requestHeader{
-				Xid:    xid,
-				Opcode: opDelete,
-			},
 			Path:    path,
 			Version: version,
 		},
@@ -508,8 +488,5 @@ func (c *Conn) Delete(path string, version int32) (err error) {
 	}
 	c.sendChan <- req
 	err = <-ch
-	if err == nil {
-		err = rs.responseHeader.Err.toError()
-	}
 	return
 }

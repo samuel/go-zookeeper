@@ -16,6 +16,6 @@ func TestCreate(t *testing.T) {
 	if path, err := zk.Create("/gozk-test", []byte{1, 2, 3, 4}, 0, WorldACL(PermAll)); err != nil {
 		t.Fatalf("Create returned error: %+v", err)
 	} else if path != "/gozk-test" {
-		t.Fatalf("Create returned different path %s != '/gozk-test'", path)
+		t.Fatalf("Create returned different path '%s' != '/gozk-test'", path)
 	}
 }

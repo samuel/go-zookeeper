@@ -9,10 +9,10 @@ func TestEncodeDecodePacket(t *testing.T) {
 	encodeDecodeTest(t, &requestHeader{-2, 5})
 	encodeDecodeTest(t, &connectResponse{1, 2, 3, nil})
 	encodeDecodeTest(t, &connectResponse{1, 2, 3, []byte{4, 5, 6}})
-	encodeDecodeTest(t, &getAclResponse{responseHeader{1, 2, 3}, []ACL{{12, "s", "anyone"}}, Stat{}})
-	encodeDecodeTest(t, &getChildrenResponse{responseHeader{1, 2, 3}, []string{"foo", "bar"}})
-	encodeDecodeTest(t, &pathWatchRequest{requestHeader{1, 2}, "path", true})
-	encodeDecodeTest(t, &pathWatchRequest{requestHeader{1, 2}, "path", false})
+	encodeDecodeTest(t, &getAclResponse{[]ACL{{12, "s", "anyone"}}, Stat{}})
+	encodeDecodeTest(t, &getChildrenResponse{[]string{"foo", "bar"}})
+	encodeDecodeTest(t, &pathWatchRequest{"path", true})
+	encodeDecodeTest(t, &pathWatchRequest{"path", false})
 }
 
 func encodeDecodeTest(t *testing.T, r interface{}) {

@@ -35,9 +35,11 @@ func trace(conn1, conn2 net.Conn, client bool) {
 
 		var cr interface{} = nil
 		var opcode int32 = -1
+		readHeader := true
 		if client {
 			if init {
 				cr = &connectRequest{}
+				readHeader = false
 			} else {
 				xid := int32(binary.BigEndian.Uint32(buf[4:8]))
 				opcode = int32(binary.BigEndian.Uint32(buf[8:12]))
@@ -78,6 +80,7 @@ func trace(conn1, conn2 net.Conn, client bool) {
 		} else {
 			if init {
 				cr = &connectResponse{}
+				readHeader = false
 			} else {
 				xid := int32(binary.BigEndian.Uint32(buf[4:8]))
 				zxid := int64(binary.BigEndian.Uint64(buf[8:16]))
@@ -139,10 +142,26 @@ func trace(conn1, conn2 net.Conn, client bool) {
 		if cr == nil {
 			fmt.Printf("%+v %s %+v\n", client, opname, buf[4:4+blen])
 		} else {
-			if _, err := decodePacket(buf[4:4+blen], cr); err != nil {
+			n := 4
+			hdrStr := ""
+			if readHeader {
+				var hdr interface{}
+				if client {
+					hdr = &requestHeader{}
+				} else {
+					hdr = &responseHeader{}
+				}
+				if n2, err := decodePacket(buf[n:n+blen], hdr); err != nil {
+					fmt.Println(err)
+				} else {
+					n += n2
+				}
+				hdrStr = fmt.Sprintf("%+v", hdr)
+			}
+			if _, err := decodePacket(buf[n:n+blen], cr); err != nil {
 				fmt.Println(err)
 			}
-			fmt.Printf("%+v %s %+v\n", client, opname, cr)
+			fmt.Printf("%+v %s%s %+v\n", client, opname, hdrStr, cr)
 		}
 
 		init = false

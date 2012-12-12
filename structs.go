@@ -51,46 +51,33 @@ type auth struct {
 
 // Generic request structs
 
-type emptyRequest struct {
-	requestHeader
-}
-
 type pathRequest struct {
-	requestHeader
 	Path string
 }
 
 type pathVersionRequest struct {
-	requestHeader
 	Path    string
 	Version int32
 }
 
 type pathWatchRequest struct {
-	requestHeader
 	Path  string
 	Watch bool
 }
 
-type emptyResponse struct {
-	responseHeader
-}
-
 type pathResponse struct {
-	responseHeader
 	Path string
 }
 
 type statResponse struct {
-	responseHeader
 	Stat Stat
 }
 
 //
 
 type checkVersionRequest pathVersionRequest
-type closeRequest emptyRequest
-type closeResponse emptyResponse
+type closeRequest struct{}
+type closeResponse struct{}
 
 type connectRequest struct {
 	ProtocolVersion int32
@@ -108,7 +95,6 @@ type connectResponse struct {
 }
 
 type createRequest struct {
-	requestHeader
 	Path  string
 	Data  []byte
 	Acl   []ACL
@@ -117,10 +103,9 @@ type createRequest struct {
 
 type createResponse pathResponse
 type deleteRequest pathVersionRequest
-type deleteResponse emptyResponse
+type deleteResponse struct{}
 
 type errorResponse struct {
-	responseHeader
 	Err int32
 }
 
@@ -129,7 +114,6 @@ type existsResponse statResponse
 type getAclRequest pathRequest
 
 type getAclResponse struct {
-	responseHeader
 	Acl  []ACL
 	Stat Stat
 }
@@ -137,14 +121,12 @@ type getAclResponse struct {
 type getChildrenRequest pathRequest
 
 type getChildrenResponse struct {
-	responseHeader
 	Children []string
 }
 
 type getChildren2Request pathWatchRequest
 
 type getChildren2Response struct {
-	responseHeader
 	Children []string
 	Stat     Stat
 }
@@ -152,7 +134,6 @@ type getChildren2Response struct {
 type getDataRequest pathWatchRequest
 
 type getDataResponse struct {
-	responseHeader
 	Data []byte
 	Stat Stat
 }
@@ -160,20 +141,17 @@ type getDataResponse struct {
 type getMaxChildrenRequest pathRequest
 
 type getMaxChildrenResponse struct {
-	responseHeader
 	Max int32
 }
 
 type getSaslRequest struct {
-	requestHeader
 	Token []byte
 }
 
-type pingRequest emptyRequest
-type pingResponse emptyResponse
+type pingRequest struct{}
+type pingResponse struct{}
 
 type setAclRequest struct {
-	requestHeader
 	Path    string
 	Acl     []ACL
 	Version int32
@@ -182,7 +160,6 @@ type setAclRequest struct {
 type setAclResponse statResponse
 
 type setDataRequest struct {
-	requestHeader
 	Path    string
 	Data    []byte
 	Version int32
@@ -191,38 +168,31 @@ type setDataRequest struct {
 type setDataResponse statResponse
 
 type setMaxChildren struct {
-	requestHeader
 	Path string
 	Max  int32
 }
 
 type setSaslRequest struct {
-	requestHeader
 	Token string
 }
 
 type setSaslResponse struct {
-	responseHeader
 	Token string
 }
 
 type setWatchesRequest struct {
-	requestHeader
 	RealtiveZxid int64
 	DataWatches  []string
 	ExistWatches []string
 	ChildWatches []string
 }
 
-type setWatchesResponse struct {
-	responseHeader
-}
+type setWatchesResponse struct{}
 
 type syncRequest pathRequest
 type syncResponse pathResponse
 
 type watcherEvent struct {
-	responseHeader
 	Type  EventType
 	State State
 	Path  string
