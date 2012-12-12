@@ -4,6 +4,13 @@ import (
 	"encoding/binary"
 	"errors"
 	"reflect"
+	"runtime"
+)
+
+var (
+	ErrUnhandledFieldType = errors.New("zk: unhandled field type")
+	ErrPtrExpected        = errors.New("zk: encode/decode expect a non-nil pointer to struct")
+	ErrShortBuffer        = errors.New("zk: buffer too small")
 )
 
 type ACL struct {
@@ -198,10 +205,20 @@ type watcherEvent struct {
 	Path  string
 }
 
-func decodePacket(buf []byte, st interface{}) (int, error) {
+func decodePacket(buf []byte, st interface{}) (n int, err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			if e, ok := r.(runtime.Error); ok && e.Error() == "runtime error: slice bounds out of range" {
+				err = ErrShortBuffer
+			} else {
+				panic(r)
+			}
+		}
+	}()
+
 	v := reflect.ValueOf(st)
 	if v.Kind() != reflect.Ptr || v.IsNil() {
-		return 0, errors.New("Invalid ptr")
+		return 0, ErrPtrExpected
 	}
 	return decodePacketValue(buf, v.Elem())
 }
@@ -210,7 +227,7 @@ func decodePacketValue(buf []byte, v reflect.Value) (int, error) {
 	n := 0
 	switch v.Kind() {
 	default:
-		return n, errors.New("Unhandled field type")
+		return n, ErrUnhandledFieldType
 	case reflect.Struct:
 		for i := 0; i < v.NumField(); i++ {
 			field := v.Field(i)
@@ -263,10 +280,20 @@ func decodePacketValue(buf []byte, v reflect.Value) (int, error) {
 	return n, nil
 }
 
-func encodePacket(buf []byte, st interface{}) (int, error) {
+func encodePacket(buf []byte, st interface{}) (n int, err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			if e, ok := r.(runtime.Error); ok && e.Error() == "runtime error: slice bounds out of range" {
+				err = ErrShortBuffer
+			} else {
+				panic(r)
+			}
+		}
+	}()
+
 	v := reflect.ValueOf(st)
 	if v.Kind() != reflect.Ptr || v.IsNil() {
-		return 0, errors.New("Invalid ptr")
+		return 0, ErrPtrExpected
 	}
 	return encodePacketValue(buf, v.Elem())
 }
@@ -275,7 +302,7 @@ func encodePacketValue(buf []byte, v reflect.Value) (int, error) {
 	n := 0
 	switch v.Kind() {
 	default:
-		return n, errors.New("Unhandled field type")
+		return n, ErrUnhandledFieldType
 	case reflect.Struct:
 		for i := 0; i < v.NumField(); i++ {
 			field := v.Field(i)

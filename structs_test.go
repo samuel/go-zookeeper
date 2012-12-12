@@ -37,3 +37,21 @@ func encodeDecodeTest(t *testing.T, r interface{}) {
 		return
 	}
 }
+
+func TestEncodeShortBuffer(t *testing.T) {
+	buf := make([]byte, 0)
+	_, err := encodePacket(buf, &requestHeader{1, 2})
+	if err != ErrShortBuffer {
+		t.Errorf("encodePacket should return ErrShortBuffer on a short buffer instead of '%+v'", err)
+		return
+	}
+}
+
+func TestDecodeShortBuffer(t *testing.T) {
+	buf := make([]byte, 0)
+	_, err := decodePacket(buf, &responseHeader{})
+	if err != ErrShortBuffer {
+		t.Errorf("decodePacket should return ErrShortBuffer on a short buffer instead of '%+v'", err)
+		return
+	}
+}
