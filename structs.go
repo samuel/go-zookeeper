@@ -3,6 +3,8 @@ package zk
 import (
 	"encoding/binary"
 	"errors"
+	"fmt"
+	"log"
 	"reflect"
 )
 
@@ -232,7 +234,16 @@ type watcherEvent struct {
 	Path  string
 }
 
-func decodePacket(buf []byte, st interface{}) (int, error) {
+func decodePacket(buf []byte, st interface{}) (i int, e error) {
+	// log.Println("in decodePacket")
+	// log.Printf("st: %+v\n", st)
+	defer func() {
+		if r := recover(); r != nil {
+			e = errors.New("decodePacket: " + fmt.Sprintf("%v", r))
+			// fmt.Println("Recovered in f", r)
+		}
+	}()
+
 	v := reflect.ValueOf(st)
 	if v.Kind() != reflect.Ptr || v.IsNil() {
 		return 0, errors.New("Invalid ptr")
@@ -240,7 +251,16 @@ func decodePacket(buf []byte, st interface{}) (int, error) {
 	return decodePacketValue(buf, v.Elem())
 }
 
-func decodePacketValue(buf []byte, v reflect.Value) (int, error) {
+func decodePacketValue(buf []byte, v reflect.Value) (i int, e error) {
+	// log.Println("in decodePacketValue")
+	// log.Printf("v: %+v\n", v)
+	defer func() {
+		if r := recover(); r != nil {
+			e = errors.New("decodePacketValue: " + fmt.Sprintf("%v", r))
+			// fmt.Println("Recovered in f", r)
+		}
+	}()
+
 	n := 0
 	switch v.Kind() {
 	default:
@@ -294,10 +314,21 @@ func decodePacketValue(buf []byte, v reflect.Value) (int, error) {
 			}
 		}
 	}
+	// log.Println("out decodePacketValue")
 	return n, nil
 }
 
-func encodePacket(buf []byte, st interface{}) (int, error) {
+func encodePacket(buf []byte, st interface{}) (i int, e error) {
+	// log.Println("in encodePacket")
+	// log.Printf("st: %-v\n", st)
+
+	defer func() {
+		if r := recover(); r != nil {
+			e = errors.New("encodePacket: " + fmt.Sprintf("%v", r))
+			// fmt.Println("Recovered in f", r)
+		}
+	}()
+
 	v := reflect.ValueOf(st)
 	if v.Kind() != reflect.Ptr || v.IsNil() {
 		return 0, errors.New("Invalid ptr")
@@ -305,7 +336,16 @@ func encodePacket(buf []byte, st interface{}) (int, error) {
 	return encodePacketValue(buf, v.Elem())
 }
 
-func encodePacketValue(buf []byte, v reflect.Value) (int, error) {
+func encodePacketValue(buf []byte, v reflect.Value) (i int, e error) {
+	// log.Printf("in encodePacketValue  kind: %+v\n", v.Kind())
+	// log.Printf("in encodePacketValue value: %+v\n", v.Interface())
+	defer func() {
+		if r := recover(); r != nil {
+			e = errors.New("encodePacketValue: " + fmt.Sprintf("%v", r))
+			// fmt.Println("Recovered in f", r)
+		}
+	}()
+
 	n := 0
 	switch v.Kind() {
 	default:
@@ -340,17 +380,22 @@ func encodePacketValue(buf []byte, v reflect.Value) (int, error) {
 	case reflect.Slice:
 		switch v.Type().Elem().Kind() {
 		default:
-			count := int(binary.BigEndian.Uint32(buf[n : n+4]))
+			// count := int(binary.BigEndian.Uint32(buf[n : n+4]))
+			count := v.Len()
 			n += 4
-			values := reflect.MakeSlice(v.Type(), count, count)
-			v.Set(values)
 			for i := 0; i < count; i++ {
-				n2, err := decodePacketValue(buf[n:], values.Index(i))
+				n2, err := encodePacketValue(buf[n:], v.Index(i))
+				log.Printf("?????????????>>count: %+v, n: %+v, n2:%+v, v: %+v\n", count, n, n2, v.Index(i).Interface())
 				n += n2
 				if err != nil {
 					return n, err
 				}
 			}
+			log.Printf("?????????????>>count: %+v, n: %+v\n", count, n)
+			log.Printf("?????????????>>buf before: %+v\n", buf)
+			// add the size for the acl structure
+			binary.BigEndian.PutUint32(buf[0:4], uint32(n-4))
+			log.Printf("?????????????>>buf after: %+v\n", buf)
 		case reflect.Uint8:
 			if v.IsNil() {
 				binary.BigEndian.PutUint32(buf[n:n+4], uint32(0xffffffff))
