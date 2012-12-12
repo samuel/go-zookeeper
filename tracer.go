@@ -131,7 +131,7 @@ func trace(conn1, conn2 net.Conn, client bool) {
 					cr = &watcherEvent{}
 				}
 				if errnum != 0 {
-					cr = &responseHeader{}
+					cr = &struct{}{}
 				}
 			}
 		}
@@ -156,7 +156,7 @@ func trace(conn1, conn2 net.Conn, client bool) {
 				} else {
 					n += n2
 				}
-				hdrStr = fmt.Sprintf("%+v", hdr)
+				hdrStr = fmt.Sprintf(" %+v", hdr)
 			}
 			if _, err := decodePacket(buf[n:n+blen], cr); err != nil {
 				fmt.Println(err)

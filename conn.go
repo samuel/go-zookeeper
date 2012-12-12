@@ -333,9 +333,10 @@ func (c *Conn) handler() error {
 			if !ok {
 				log.Printf("Response for unknown request with xid %d", res.Xid)
 			} else {
-				_, err := decodePacket(buf[16:16+blen], req.recvStruct)
-				if err == nil {
+				if res.Err != 0 {
 					err = res.Err.toError()
+				} else {
+					_, err = decodePacket(buf[16:16+blen], req.recvStruct)
 				}
 				req.recvChan <- err
 			}
@@ -397,7 +398,6 @@ func (c *Conn) ChildrenW(path string) ([]string, *Stat, chan Event, error) {
 			watchers = make([]*watcher, 0)
 		}
 		c.watchers[path] = append(watchers, &watcher{EventNodeChildrenChanged, ech})
-
 	}
 	return rs.Children, &rs.Stat, ech, err
 }
