@@ -42,7 +42,6 @@ type Conn struct {
 	sendChan     chan *request
 	requests     map[int32]*request // Xid -> pending request
 	requestsLock sync.Mutex
-	closeChan    chan bool
 	watchers     map[string][]*watcher
 
 	xid       int32
@@ -108,7 +107,6 @@ func (c *Conn) connect() {
 		if err == nil {
 			c.conn = zkConn
 			c.state = StateConnected
-			c.closeChan = make(chan bool)
 			c.eventChan <- Event{EventSession, c.state, ""}
 			return
 		}
@@ -125,12 +123,17 @@ func (c *Conn) connect() {
 func (c *Conn) loop() {
 	for {
 		c.connect()
-		err := c.handler()
+		err := c.authenticate()
 		if err == nil {
-			panic("zk: handler should never return nil error")
+			closeChan := make(chan bool)
+			go c.sendLoop(c.conn, closeChan)
+			err = c.recvLoop(c.conn)
+			if err == nil {
+				panic("zk: recvLoop should never return nil error")
+			}
+			close(closeChan)
 		}
 		c.conn.Close()
-		close(c.closeChan)
 
 		c.state = StateDisconnected
 		c.eventChan <- Event{EventSession, c.state, ""}
@@ -147,8 +150,8 @@ func (c *Conn) loop() {
 	}
 }
 
-func (c *Conn) handler() error {
-	buf := make([]byte, bufferSize)
+func (c *Conn) authenticate() error {
+	buf := make([]byte, 256)
 
 	// connect request
 
@@ -209,72 +212,76 @@ func (c *Conn) handler() error {
 	c.xid = 0
 	c.eventChan <- Event{EventSession, c.state, ""}
 
-	// Send loop
-	go func() {
-		closeChan := c.closeChan
-		pingTicker := time.NewTicker(c.pingInterval)
-		defer pingTicker.Stop()
-		buf := make([]byte, bufferSize)
-		for {
-			select {
-			case req := <-c.sendChan:
-				header := &requestHeader{req.xid, req.opcode}
-				n, err := encodePacket(buf[4:], header)
-				if err != nil {
-					req.recvChan <- err
-					return
-				}
+	return nil
+}
 
-				n2, err := encodePacket(buf[4+n:], req.pkt)
-				if err != nil {
-					req.recvChan <- err
-					continue
-				}
+func (c *Conn) sendLoop(conn net.Conn, closeChan <-chan bool) error {
+	pingTicker := time.NewTicker(c.pingInterval)
+	defer pingTicker.Stop()
 
-				n += n2
-
-				binary.BigEndian.PutUint32(buf[:4], uint32(n))
-
-				_, err = c.conn.Write(buf[:n+4])
-				if err != nil {
-					req.recvChan <- err
-					c.conn.Close()
-					return
-				}
-
-				c.requestsLock.Lock()
-				select {
-				case <-closeChan:
-					req.recvChan <- ErrConnectionClosed
-					c.requestsLock.Unlock()
-					return
-				default:
-				}
-				c.requests[req.xid] = req
-				c.requestsLock.Unlock()
-			case <-pingTicker.C:
-				n, err := encodePacket(buf[4:], &requestHeader{Xid: -2, Opcode: opPing})
-				if err != nil {
-					panic("zk: opPing should never fail to serialize")
-				}
-
-				binary.BigEndian.PutUint32(buf[:4], uint32(n))
-
-				_, err = c.conn.Write(buf[:n+4])
-				if err != nil {
-					c.conn.Close()
-					return
-				}
-			case <-closeChan:
-				return
+	buf := make([]byte, bufferSize)
+	for {
+		select {
+		case req := <-c.sendChan:
+			header := &requestHeader{req.xid, req.opcode}
+			n, err := encodePacket(buf[4:], header)
+			if err != nil {
+				req.recvChan <- err
+				continue
 			}
-		}
-	}()
 
-	// Receive loop
+			n2, err := encodePacket(buf[4+n:], req.pkt)
+			if err != nil {
+				req.recvChan <- err
+				continue
+			}
+
+			n += n2
+
+			binary.BigEndian.PutUint32(buf[:4], uint32(n))
+
+			_, err = conn.Write(buf[:n+4])
+			if err != nil {
+				req.recvChan <- err
+				conn.Close()
+				return err
+			}
+
+			c.requestsLock.Lock()
+			select {
+			case <-closeChan:
+				req.recvChan <- ErrConnectionClosed
+				c.requestsLock.Unlock()
+				return ErrConnectionClosed
+			default:
+			}
+			c.requests[req.xid] = req
+			c.requestsLock.Unlock()
+		case <-pingTicker.C:
+			n, err := encodePacket(buf[4:], &requestHeader{Xid: -2, Opcode: opPing})
+			if err != nil {
+				panic("zk: opPing should never fail to serialize")
+			}
+
+			binary.BigEndian.PutUint32(buf[:4], uint32(n))
+
+			_, err = conn.Write(buf[:n+4])
+			if err != nil {
+				conn.Close()
+				return err
+			}
+		case <-closeChan:
+			return nil
+		}
+	}
+	panic("not reached")
+}
+
+func (c *Conn) recvLoop(conn net.Conn) error {
+	buf := make([]byte, bufferSize)
 	for {
 		// package length
-		_, err = io.ReadFull(c.conn, buf[:4])
+		_, err := io.ReadFull(conn, buf[:4])
 		if err != nil {
 			return err
 		}
@@ -284,7 +291,7 @@ func (c *Conn) handler() error {
 			buf = make([]byte, blen)
 		}
 
-		_, err = io.ReadFull(c.conn, buf[:blen])
+		_, err = io.ReadFull(conn, buf[:blen])
 		if err != nil {
 			return err
 		}
@@ -342,9 +349,7 @@ func (c *Conn) handler() error {
 			}
 		}
 	}
-
-	// Shouldn't ever get here
-	panic("zk: handler should never reach the end")
+	panic("not reached")
 }
 
 func (c *Conn) nextXid() int32 {
