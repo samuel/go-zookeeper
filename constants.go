@@ -68,6 +68,11 @@ const (
 	StateHasSession = State(101)
 )
 
+const (
+	FlagEphemeral = 1
+	FlagSequence  = 2
+)
+
 var (
 	stateNames = map[State]string{
 		StateUnknown:           "StateUnknown",
@@ -97,19 +102,19 @@ type ErrCode int32
 var (
 	ErrUnknown                 = errors.New("zk: unknown error")
 	ErrApiError                = errors.New("zk: api error")
-	ErrNoNode                  = errors.New("zk: no node")
-	ErrNoAuth                  = errors.New("zk: no auth")
-	ErrBadVersion              = errors.New("zk: bad version")
-	ErrNoChildrenForEphemerals = errors.New("zk: no children for ephemerals")
-	ErrNodeExists              = errors.New("zk: node exists")
-	ErrNotEmpty                = errors.New("zk: not empty")
-	// ErrSessionExpired          = errors.New("zk: session expired")
-	ErrInvalidCallback = errors.New("zk: invalid callback")
-	ErrInvalidACL      = errors.New("zk: invalid ACL")
-	ErrAuthFailed      = errors.New("zk: auth failed")
-	ErrClosing         = errors.New("zk: closing")
-	ErrNothing         = errors.New("zk: nothing")
-	ErrSessionMoved    = errors.New("zk: session moved")
+	ErrNoNode                  = errors.New("zk: node does not exist")
+	ErrNoAuth                  = errors.New("zk: not authenticated")
+	ErrBadVersion              = errors.New("zk: version conflict")
+	ErrNoChildrenForEphemerals = errors.New("zk: ephemeral nodes may not have children")
+	ErrNodeExists              = errors.New("zk: node already exists")
+	ErrNotEmpty                = errors.New("zk: node has children")
+	// ErrSessionExpired          = errors.New("zk: session has been expired by the server")
+	ErrInvalidCallback = errors.New("zk: invalid callback specified")
+	ErrInvalidACL      = errors.New("zk: invalid ACL specified")
+	ErrAuthFailed      = errors.New("zk: client authentication failed")
+	ErrClosing         = errors.New("zk: zookeeper is closing")
+	ErrNothing         = errors.New("zk: no server responsees to process")
+	ErrSessionMoved    = errors.New("zk: session moved to another server, so operation is ignored")
 	errCodeToError     = map[ErrCode]error{
 		0:                          nil,
 		errApiError:                ErrApiError,

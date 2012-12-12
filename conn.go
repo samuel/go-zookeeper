@@ -459,7 +459,7 @@ func (c *Conn) Set(path string, data []byte) (stat *Stat, err error) {
 	return
 }
 
-func (c *Conn) Create(path string, data []byte, acl []ACL) (rpath string, err error) {
+func (c *Conn) Create(path string, data []byte, flags int32, acl []ACL) (rpath string, err error) {
 	xid := c.nextXid()
 	ch := make(chan error)
 	rs := &createResponse{}
@@ -473,7 +473,7 @@ func (c *Conn) Create(path string, data []byte, acl []ACL) (rpath string, err er
 			Path:  path,
 			Data:  data,
 			Acl:   acl,
-			Flags: 0,
+			Flags: flags,
 		},
 		recvStruct: rs,
 		recvChan:   ch,
