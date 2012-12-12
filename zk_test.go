@@ -6,7 +6,7 @@ import (
 )
 
 func TestCreate(t *testing.T) {
-	zk, chEvent, err := Connect([]string{"127.0.0.1:2182"}, time.Second*15)
+	zk, _, err := Connect([]string{"127.0.0.1:2182"}, time.Second*15)
 	if err != nil {
 		t.Fatalf("Connect returned error: %+v", err)
 	}
@@ -18,6 +18,4 @@ func TestCreate(t *testing.T) {
 	} else if path != "/gozk-test" {
 		t.Fatalf("Create returned different path %s != '/gozk-test'", path)
 	}
-	_ = chEvent
-	time.Sleep(time.Second)
 }
