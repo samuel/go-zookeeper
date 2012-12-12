@@ -6,14 +6,10 @@ import (
 	"reflect"
 )
 
-type id struct {
+type ACL struct {
+	Perms  int32
 	Scheme string
-	Id     int32
-}
-
-type acl struct {
-	Perms int32
-	Id    id
+	Id     string
 }
 
 type Stat struct {
@@ -38,13 +34,13 @@ type requestHeader struct {
 type responseHeader struct {
 	Xid  int32
 	Zxid int64
-	Err  int32
+	Err  ErrCode
 }
 
 type multiHeader struct {
 	Type int32
 	Done bool
-	Err  int32
+	Err  ErrCode
 }
 
 type auth struct {
@@ -115,7 +111,7 @@ type createRequest struct {
 	requestHeader
 	Path  string
 	Data  []byte
-	Acl   []acl
+	Acl   []ACL
 	Flags int32
 }
 
@@ -134,7 +130,7 @@ type getAclRequest pathRequest
 
 type getAclResponse struct {
 	responseHeader
-	Acl  []acl
+	Acl  []ACL
 	Stat Stat
 }
 
@@ -179,7 +175,7 @@ type pingResponse emptyResponse
 type setAclRequest struct {
 	requestHeader
 	Path    string
-	Acl     []acl
+	Acl     []ACL
 	Version int32
 }
 
@@ -340,17 +336,17 @@ func encodePacketValue(buf []byte, v reflect.Value) (int, error) {
 	case reflect.Slice:
 		switch v.Type().Elem().Kind() {
 		default:
-			count := int(binary.BigEndian.Uint32(buf[n : n+4]))
+			count := v.Len()
+			startN := n
 			n += 4
-			values := reflect.MakeSlice(v.Type(), count, count)
-			v.Set(values)
 			for i := 0; i < count; i++ {
-				n2, err := decodePacketValue(buf[n:], values.Index(i))
+				n2, err := encodePacketValue(buf[n:], v.Index(i))
 				n += n2
 				if err != nil {
 					return n, err
 				}
 			}
+			binary.BigEndian.PutUint32(buf[startN:startN+4], uint32(count))
 		case reflect.Uint8:
 			if v.IsNil() {
 				binary.BigEndian.PutUint32(buf[n:n+4], uint32(0xffffffff))

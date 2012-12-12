@@ -168,7 +168,7 @@ func handleConnection(conn net.Conn) {
 	trace(zkConn, conn, false)
 }
 
-func startTracer() {
+func StartTracer() {
 	ln, err := net.Listen("tcp", "127.0.0.1:2182")
 	if err != nil {
 		panic(err)

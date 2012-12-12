@@ -93,6 +93,10 @@ func Connect(servers []string, recvTimeout time.Duration) (*Conn, <-chan Event, 
 
 func (c *Conn) Close() {
 	// TODO
+
+	// if c.conn != nil {
+	// 	c.conn.Close()
+	// }
 }
 
 func (c *Conn) connect() {
@@ -352,8 +356,13 @@ func (c *Conn) Children(path string) (children []string, stat *Stat, err error) 
 	}
 	c.sendChan <- req
 	err = <-ch
-	children = rs.Children
-	stat = &rs.Stat
+	if err == nil {
+		err = rs.responseHeader.Err.toError()
+	}
+	if err == nil {
+		children = rs.Children
+		stat = &rs.Stat
+	}
 	return
 }
 
@@ -377,6 +386,9 @@ func (c *Conn) ChildrenW(path string) ([]string, *Stat, chan Event, error) {
 	c.sendChan <- req
 	err := <-ch
 	var ech chan Event
+	if err == nil {
+		err = rs.responseHeader.Err.toError()
+	}
 	if err == nil {
 		ech = make(chan Event, 1)
 		watchers := c.watchers[path]
@@ -408,7 +420,96 @@ func (c *Conn) Get(path string) (data []byte, stat *Stat, err error) {
 	}
 	c.sendChan <- req
 	err = <-ch
-	data = rs.Data
-	stat = &rs.Stat
+	if err == nil {
+		err = rs.responseHeader.Err.toError()
+	}
+	if err == nil {
+		data = rs.Data
+		stat = &rs.Stat
+	}
+	return
+}
+
+func (c *Conn) Set(path string, data []byte) (stat *Stat, err error) {
+	xid := c.nextXid()
+	ch := make(chan error)
+	rs := &setDataResponse{}
+	req := &request{
+		xid: xid,
+		pkt: &setDataRequest{
+			requestHeader: requestHeader{
+				Xid:    xid,
+				Opcode: opSetData,
+			},
+			Path:    path,
+			Data:    data,
+			Version: -1,
+		},
+		recvStruct: rs,
+		recvChan:   ch,
+	}
+	c.sendChan <- req
+	err = <-ch
+	if err == nil {
+		err = rs.responseHeader.Err.toError()
+	}
+	if err == nil {
+		stat = &rs.Stat
+	}
+	return
+}
+
+func (c *Conn) Create(path string, data []byte, acl []ACL) (rpath string, err error) {
+	xid := c.nextXid()
+	ch := make(chan error)
+	rs := &createResponse{}
+	req := &request{
+		xid: xid,
+		pkt: &createRequest{
+			requestHeader: requestHeader{
+				Xid:    xid,
+				Opcode: opCreate,
+			},
+			Path:  path,
+			Data:  data,
+			Acl:   acl,
+			Flags: 0,
+		},
+		recvStruct: rs,
+		recvChan:   ch,
+	}
+	c.sendChan <- req
+	err = <-ch
+	if err == nil {
+		err = rs.responseHeader.Err.toError()
+	}
+	if err == nil {
+		rpath = rs.Path
+	}
+	return
+}
+
+func (c *Conn) Delete(path string, version int32) (err error) {
+	xid := c.nextXid()
+	ch := make(chan error)
+	rs := &deleteResponse{}
+	req := &request{
+		xid: xid,
+		pkt: &deleteRequest{
+			requestHeader: requestHeader{
+				Xid:    xid,
+				Opcode: opDelete,
+			},
+			Path:    path,
+			Version: version,
+		},
+		recvStruct: rs,
+		recvChan:   ch,
+	}
+	c.sendChan <- req
+	err = <-ch
+	if err == nil {
+		err = rs.responseHeader.Err.toError()
+	}
 	return
 }

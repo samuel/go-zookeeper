@@ -1,5 +1,9 @@
 package zk
 
+import (
+	"errors"
+)
+
 const (
 	protocolVersion = 0
 
@@ -88,6 +92,50 @@ func (s State) String() string {
 	return "Unknown"
 }
 
+type ErrCode int32
+
+var (
+	ErrUnknown                 = errors.New("zk: unknown error")
+	ErrApiError                = errors.New("zk: api error")
+	ErrNoNode                  = errors.New("zk: no node")
+	ErrNoAuth                  = errors.New("zk: no auth")
+	ErrBadVersion              = errors.New("zk: bad version")
+	ErrNoChildrenForEphemerals = errors.New("zk: no children for ephemerals")
+	ErrNodeExists              = errors.New("zk: node exists")
+	ErrNotEmpty                = errors.New("zk: not empty")
+	// ErrSessionExpired          = errors.New("zk: session expired")
+	ErrInvalidCallback = errors.New("zk: invalid callback")
+	ErrInvalidACL      = errors.New("zk: invalid ACL")
+	ErrAuthFailed      = errors.New("zk: auth failed")
+	ErrClosing         = errors.New("zk: closing")
+	ErrNothing         = errors.New("zk: nothing")
+	ErrSessionMoved    = errors.New("zk: session moved")
+	errCodeToError     = map[ErrCode]error{
+		0:                          nil,
+		errApiError:                ErrApiError,
+		errNoNode:                  ErrNoNode,
+		errNoAuth:                  ErrNoAuth,
+		errBadVersion:              ErrBadVersion,
+		errNoChildrenForEphemerals: ErrNoChildrenForEphemerals,
+		errNodeExists:              ErrNodeExists,
+		errNotEmpty:                ErrNotEmpty,
+		errSessionExpired:          ErrSessionExpired,
+		errInvalidCallback:         ErrInvalidCallback,
+		errInvalidAcl:              ErrInvalidACL,
+		errAuthFailed:              ErrAuthFailed,
+		errClosing:                 ErrClosing,
+		errNothing:                 ErrNothing,
+		errSessionMoved:            ErrSessionMoved,
+	}
+)
+
+func (e ErrCode) toError() error {
+	if err, ok := errCodeToError[e]; ok {
+		return err
+	}
+	return ErrUnknown
+}
+
 const (
 	errOk = 0
 	// System and server-side errors
@@ -101,22 +149,23 @@ const (
 	errBadArguments         = -8
 	errInvalidState         = -9
 	// API errors
-	errApiError                = -100
-	errNoNode                  = -101 // *
-	errNoAuth                  = -102
-	errBadVersion              = -103 // *
-	errNoChildrenForEphemerals = -108
-	errNodeExists              = -110 // *
-	errNotEmpty                = -111
-	errSessionExpired          = -112
-	errInvalidCallback         = -113
-	errInvalidAcl              = -114
-	errAuthFailed              = -115
-	errClosing                 = -116
-	errNothing                 = -117
-	errSessionMoved            = -118
+	errApiError                = ErrCode(-100)
+	errNoNode                  = ErrCode(-101) // *
+	errNoAuth                  = ErrCode(-102)
+	errBadVersion              = ErrCode(-103) // *
+	errNoChildrenForEphemerals = ErrCode(-108)
+	errNodeExists              = ErrCode(-110) // *
+	errNotEmpty                = ErrCode(-111)
+	errSessionExpired          = ErrCode(-112)
+	errInvalidCallback         = ErrCode(-113)
+	errInvalidAcl              = ErrCode(-114)
+	errAuthFailed              = ErrCode(-115)
+	errClosing                 = ErrCode(-116)
+	errNothing                 = ErrCode(-117)
+	errSessionMoved            = ErrCode(-118)
 )
 
+// Constants for ACL permissions
 const (
 	PermRead = 1 << iota
 	PermWrite
