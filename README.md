@@ -3,8 +3,8 @@ go-zookeeper
 
 Native ZooKeeper client for Go, forked from https://github.com/samuel/go-zookeeper
 
-Added `set` and `create`, `create` still errors out
-Left in commented debug statements
+* Added `set` and `create`, `create` still errors out
+* Left in commented debug statements
 
 
 `create` errors is as follows:
