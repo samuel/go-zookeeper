@@ -304,10 +304,6 @@ func (c *Conn) recvLoop(conn net.Conn) error {
 
 		// log.Printf("Response xid=%d zxid=%d err=%d\n", res.Xid, res.Zxid, res.Err)
 
-		if res.Zxid > 0 {
-			c.lastZxid = res.Zxid
-		}
-
 		if res.Xid == -1 {
 			res := &watcherEvent{}
 			_, err := decodePacket(buf[16:16+blen], res)
@@ -329,7 +325,13 @@ func (c *Conn) recvLoop(conn net.Conn) error {
 			}
 		} else if res.Xid == -2 {
 			// Ping response. Ignore.
+		} else if res.Xid < 0 {
+			log.Printf("Xid < 0 (%d) but not ping or watcher event", res.Xid)
 		} else {
+			if res.Zxid > 0 {
+				c.lastZxid = res.Zxid
+			}
+
 			c.requestsLock.Lock()
 			req, ok := c.requests[res.Xid]
 			if ok {
