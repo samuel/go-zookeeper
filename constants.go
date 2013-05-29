@@ -47,7 +47,7 @@ var (
 		EventNodeCreated:         "EventNodeCreated",
 		EventNodeDeleted:         "EventNodeDeleted",
 		EventNodeDataChanged:     "EventNodeDataChanged",
-		EventNodeChildrenChanged: "EventNodeChildrenchanged",
+		EventNodeChildrenChanged: "EventNodeChildrenChanged",
 		EventSession:             "EventSession",
 		EventNotWatching:         "EventNotWatching",
 	}

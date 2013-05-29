@@ -16,7 +16,9 @@ import (
 )
 
 const (
-	bufferSize = 1536 * 1024
+	bufferSize    = 1536 * 1024
+	eventChanSize = 5
+	sendChanSize  = 16
 )
 
 var (
@@ -24,9 +26,28 @@ var (
 	ErrSessionExpired   = errors.New("zk: session expired")
 )
 
-type watcher struct {
-	eventType EventType
-	ch        chan Event
+type watcherType int
+
+var (
+	watcherTypeData  = watcherType(1)
+	watcherTypeExist = watcherType(2)
+	watcherTypeChild = watcherType(3)
+)
+
+func (t watcherType) matchesEvent(e EventType) bool {
+	if e == EventNodeCreated && t == watcherTypeExist {
+		return true
+	}
+	if (e == EventNodeDeleted || e == EventNodeDataChanged) && (t == watcherTypeExist || t == watcherTypeData) {
+		return true
+	}
+	return e == EventNodeChildrenChanged && t == watcherTypeChild
+}
+
+type watchers struct {
+	dataWatchers  []chan Event
+	existWatchers []chan Event
+	childWatchers []chan Event
 }
 
 type Conn struct {
@@ -43,13 +64,17 @@ type Conn struct {
 	sendChan     chan *request
 	requests     map[int32]*request // Xid -> pending request
 	requestsLock sync.Mutex
-	watchers     map[string][]*watcher
+	watchers     map[string]*watchers
+	watchersLock sync.Mutex
 
 	xid       int32
 	lastZxid  int64
 	sessionId int64
 	timeout   int32
 	passwd    []byte
+
+	// Debug (used by unit tests)
+	reconnectDelay time.Duration
 }
 
 type request struct {
@@ -64,6 +89,7 @@ type Event struct {
 	Type  EventType
 	State State
 	Path  string // For non-session events, the path of the watched node.
+	Err   error
 }
 
 func Connect(servers []string, recvTimeout time.Duration) (*Conn, <-chan Event, error) {
@@ -72,7 +98,7 @@ func Connect(servers []string, recvTimeout time.Duration) (*Conn, <-chan Event, 
 			servers[i] = addr + ":" + strconv.Itoa(defaultPort)
 		}
 	}
-	ec := make(chan Event, 5)
+	ec := make(chan Event, eventChanSize)
 	conn := Conn{
 		servers:        servers,
 		serverIndex:    0,
@@ -83,11 +109,14 @@ func Connect(servers []string, recvTimeout time.Duration) (*Conn, <-chan Event, 
 		recvTimeout:    recvTimeout,
 		pingInterval:   10 * time.Second,
 		connectTimeout: 1 * time.Second,
-		sendChan:       make(chan *request),
+		sendChan:       make(chan *request, sendChanSize),
 		requests:       make(map[int32]*request),
-		watchers:       make(map[string][]*watcher),
+		watchers:       make(map[string]*watchers),
 		passwd:         emptyPassword,
 		timeout:        30000,
+
+		// Debug
+		reconnectDelay: 0,
 	}
 	go conn.loop()
 	return &conn, ec, nil
@@ -106,7 +135,7 @@ func (c *Conn) connect() {
 		if err == nil {
 			c.conn = zkConn
 			c.state = StateConnected
-			c.eventChan <- Event{EventSession, c.state, ""}
+			c.eventChan <- Event{EventSession, c.state, "", nil}
 			return
 		}
 
@@ -120,14 +149,16 @@ func (c *Conn) connect() {
 }
 
 func (c *Conn) disconnect() {
-	c.request(-1, nil, nil)
+	c.queueRequest(-1, nil, nil, make(chan error, 1))
 }
 
 func (c *Conn) loop() {
 	for {
 		c.connect()
 		err := c.authenticate()
-		if err == nil {
+		if err == ErrSessionExpired {
+			c.invalidateWatches()
+		} else if err == nil {
 			closeChan := make(chan bool)
 			sendDone := make(chan bool, 1)
 			go func() {
@@ -151,8 +182,9 @@ func (c *Conn) loop() {
 		}
 
 		c.state = StateDisconnected
-		c.eventChan <- Event{EventSession, c.state, ""}
+		c.eventChan <- Event{EventSession, c.state, "", nil}
 
+		// Yeesh
 		if !strings.Contains(err.Error(), "use of closed network connection") {
 			log.Println(err)
 		}
@@ -170,7 +202,74 @@ func (c *Conn) loop() {
 			return
 		default:
 		}
+
+		if c.reconnectDelay > 0 {
+			time.Sleep(c.reconnectDelay)
+		}
 	}
+}
+
+func (c *Conn) invalidateWatches() {
+	c.watchersLock.Lock()
+	defer c.watchersLock.Unlock()
+
+	if len(c.watchers) >= 0 {
+		for path, wat := range c.watchers {
+			ev := Event{EventSession, c.state, path, ErrSessionExpired}
+			for _, ch := range wat.dataWatchers {
+				ch <- ev
+			}
+			for _, ch := range wat.childWatchers {
+				ch <- ev
+			}
+			for _, ch := range wat.existWatchers {
+				ch <- ev
+			}
+		}
+		c.watchers = make(map[string]*watchers, 0)
+	}
+}
+
+func (c *Conn) sendSetWatches() {
+	c.watchersLock.Lock()
+	defer c.watchersLock.Unlock()
+
+	if len(c.watchers) == 0 {
+		return
+	}
+
+	req := &setWatchesRequest{
+		RealtiveZxid: c.lastZxid,
+		DataWatches:  make([]string, 0),
+		ExistWatches: make([]string, 0),
+		ChildWatches: make([]string, 0),
+	}
+	pathLen := 0
+	for path, watchers := range c.watchers {
+		if len(watchers.dataWatchers) != 0 {
+			req.DataWatches = append(req.DataWatches, path)
+			pathLen += len(path)
+		}
+		if len(watchers.existWatchers) != 0 {
+			req.ExistWatches = append(req.ExistWatches, path)
+			pathLen += len(path)
+		}
+		if len(watchers.childWatchers) != 0 {
+			req.ChildWatches = append(req.ChildWatches, path)
+			pathLen += len(path)
+		}
+	}
+	if pathLen == 0 {
+		return
+	}
+
+	go func() {
+		res := &setWatchesResponse{}
+		err := c.request(opSetWatches, req, res)
+		if err != nil {
+			log.Fatal(err)
+		}
+	}()
 }
 
 func (c *Conn) authenticate() error {
@@ -195,6 +294,8 @@ func (c *Conn) authenticate() error {
 	if err != nil {
 		return err
 	}
+
+	c.sendSetWatches()
 
 	// connect response
 
@@ -223,17 +324,18 @@ func (c *Conn) authenticate() error {
 		c.sessionId = 0
 		c.passwd = emptyPassword
 		c.state = StateExpired
-		c.eventChan <- Event{EventSession, c.state, ""}
+		c.eventChan <- Event{EventSession, c.state, "", nil}
 		return ErrSessionExpired
 	}
 
+	if c.sessionId != r.SessionId {
+		c.xid = 0
+	}
 	c.timeout = r.TimeOut
 	c.sessionId = r.SessionId
 	c.passwd = r.Passwd
 	c.state = StateHasSession
-	// if new session
-	c.xid = 0
-	c.eventChan <- Event{EventSession, c.state, ""}
+	c.eventChan <- Event{EventSession, c.state, "", nil}
 
 	return nil
 }
@@ -343,15 +445,40 @@ func (c *Conn) recvLoop(conn net.Conn) error {
 				Type:  res.Type,
 				State: res.State,
 				Path:  res.Path,
+				Err:   nil,
 			}
-			c.eventChan <- ev
-			if watchers := c.watchers[res.Path]; watchers != nil {
-				for _, w := range watchers {
-					if w.eventType == res.Type {
-						w.ch <- ev
+			select {
+			case c.eventChan <- ev:
+			default:
+			}
+			c.watchersLock.Lock()
+			if wat := c.watchers[res.Path]; wat != nil {
+				switch res.Type {
+				case EventNodeCreated:
+					for _, ch := range wat.existWatchers {
+						ch <- ev
 					}
+					wat.existWatchers = wat.existWatchers[:0]
+				case EventNodeDeleted, EventNodeDataChanged:
+					for _, ch := range wat.existWatchers {
+						ch <- ev
+					}
+					for _, ch := range wat.dataWatchers {
+						ch <- ev
+					}
+					wat.existWatchers = wat.existWatchers[:0]
+					wat.dataWatchers = wat.dataWatchers[:0]
+				case EventNodeChildrenChanged:
+					for _, ch := range wat.childWatchers {
+						ch <- ev
+					}
+					wat.childWatchers = wat.childWatchers[:0]
+				}
+				if len(wat.childWatchers)+len(wat.dataWatchers)+len(wat.existWatchers) == 0 {
+					delete(c.watchers, res.Path)
 				}
 			}
+			c.watchersLock.Unlock()
 		} else if res.Xid == -2 {
 			// Ping response. Ignore.
 		} else if res.Xid < 0 {
@@ -387,16 +514,45 @@ func (c *Conn) nextXid() int32 {
 	return atomic.AddInt32(&c.xid, 1)
 }
 
-func (c *Conn) request(opcode int32, req interface{}, res interface{}) error {
-	ch := make(chan error)
+func (c *Conn) addWatcher(path string, watcherType watcherType) chan Event {
+	c.watchersLock.Lock()
+	defer c.watchersLock.Unlock()
+
+	ch := make(chan Event, 1)
+	wat := c.watchers[path]
+	if wat == nil {
+		wat = &watchers{
+			dataWatchers:  make([]chan Event, 0),
+			existWatchers: make([]chan Event, 0),
+			childWatchers: make([]chan Event, 0),
+		}
+		c.watchers[path] = wat
+	}
+	switch watcherType {
+	case watcherTypeChild:
+		wat.childWatchers = append(wat.childWatchers, ch)
+	case watcherTypeData:
+		wat.dataWatchers = append(wat.dataWatchers, ch)
+	case watcherTypeExist:
+		wat.existWatchers = append(wat.existWatchers, ch)
+	}
+	return ch
+}
+
+func (c *Conn) queueRequest(opcode int32, req interface{}, res interface{}, errChan chan error) {
 	rq := &request{
 		xid:        c.nextXid(),
 		opcode:     opcode,
 		pkt:        req,
 		recvStruct: res,
-		recvChan:   ch,
+		recvChan:   errChan,
 	}
 	c.sendChan <- rq
+}
+
+func (c *Conn) request(opcode int32, req interface{}, res interface{}) error {
+	ch := make(chan error)
+	c.queueRequest(opcode, req, res, ch)
 	return <-ch
 }
 
@@ -406,19 +562,12 @@ func (c *Conn) Children(path string) ([]string, *Stat, error) {
 	return res.Children, &res.Stat, err
 }
 
-func (c *Conn) ChildrenW(path string) ([]string, *Stat, chan Event, error) {
+func (c *Conn) ChildrenW(path string) ([]string, *Stat, <-chan Event, error) {
 	res := &getChildren2Response{}
 	err := c.request(opGetChildren2, &getChildren2Request{Path: path, Watch: true}, res)
-
-	// TODO: This is totally borked. Not safe.. not reliable..
 	var ech chan Event
 	if err == nil {
-		ech = make(chan Event, 1)
-		watchers := c.watchers[path]
-		if watchers == nil {
-			watchers = make([]*watcher, 0)
-		}
-		c.watchers[path] = append(watchers, &watcher{EventNodeChildrenChanged, ech})
+		ech = c.addWatcher(path, watcherTypeChild)
 	}
 	return res.Children, &res.Stat, ech, err
 }
@@ -444,4 +593,17 @@ func (c *Conn) Create(path string, data []byte, flags int32, acl []ACL) (string,
 func (c *Conn) Delete(path string, version int32) error {
 	res := &deleteResponse{}
 	return c.request(opDelete, &deleteRequest{path, version}, res)
+}
+
+// "exists" makes an "exist" watch when node doens't exist, otherwise it makes a "data" watch
+func (c *Conn) ExistsW(path string) (*Stat, <-chan Event, error) {
+	res := &existsResponse{}
+	err := c.request(opExists, &existsRequest{Path: path, Watch: true}, res)
+	var ech chan Event
+	if err == nil {
+		ech = c.addWatcher(path, watcherTypeData)
+	} else if err == ErrNoNode {
+		ech = c.addWatcher(path, watcherTypeExist)
+	}
+	return &res.Stat, ech, err
 }

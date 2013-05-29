@@ -265,7 +265,7 @@ func decodePacketValue(buf []byte, v reflect.Value) (int, error) {
 				}
 			}
 		case reflect.Uint8:
-			ln := int(binary.BigEndian.Uint32(buf[n : n+4]))
+			ln := int(int32(binary.BigEndian.Uint32(buf[n : n+4])))
 			if ln < 0 {
 				n += 4
 				v.SetBytes(nil)
