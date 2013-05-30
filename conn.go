@@ -595,7 +595,6 @@ func (c *Conn) Delete(path string, version int32) error {
 	return c.request(opDelete, &deleteRequest{path, version}, res)
 }
 
-// "exists" makes an "exist" watch when node doens't exist, otherwise it makes a "data" watch
 func (c *Conn) ExistsW(path string) (*Stat, <-chan Event, error) {
 	res := &existsResponse{}
 	err := c.request(opExists, &existsRequest{Path: path, Watch: true}, res)
