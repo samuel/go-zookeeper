@@ -177,8 +177,8 @@ func trace(conn1, conn2 net.Conn, client bool) {
 	}
 }
 
-func handleConnection(conn net.Conn) {
-	zkConn, err := net.Dial("tcp", "127.0.0.1:2181")
+func handleConnection(addr string, conn net.Conn) {
+	zkConn, err := net.Dial("tcp", addr)
 	if err != nil {
 		fmt.Println(err)
 		return
@@ -187,8 +187,8 @@ func handleConnection(conn net.Conn) {
 	trace(zkConn, conn, false)
 }
 
-func StartTracer() {
-	ln, err := net.Listen("tcp", "127.0.0.1:2182")
+func StartTracer(listenAddr, serverAddr string) {
+	ln, err := net.Listen("tcp", listenAddr)
 	if err != nil {
 		panic(err)
 	}
@@ -198,6 +198,6 @@ func StartTracer() {
 			fmt.Println(err)
 			continue
 		}
-		go handleConnection(conn)
+		go handleConnection(serverAddr, conn)
 	}
 }

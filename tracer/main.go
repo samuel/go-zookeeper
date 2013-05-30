@@ -5,5 +5,5 @@ import (
 )
 
 func main() {
-	zk.StartTracer()
+	zk.StartTracer("127.0.0.1:2182", "127.0.0.1:2181")
 }

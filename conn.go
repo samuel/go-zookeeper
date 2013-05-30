@@ -4,7 +4,6 @@ package zk
 
 import (
 	"encoding/binary"
-	"errors"
 	"io"
 	"log"
 	"net"
