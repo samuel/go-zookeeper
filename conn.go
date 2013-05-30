@@ -124,8 +124,8 @@ func Connect(servers []string, recvTimeout time.Duration) (*Conn, <-chan Event, 
 }
 
 func (c *Conn) Close() {
-	close(c.shouldQuit)
 	c.disconnect()
+	close(c.shouldQuit)
 }
 
 func (c *Conn) State() State {
@@ -162,9 +162,13 @@ func (c *Conn) connect() {
 }
 
 func (c *Conn) disconnect() {
-	c.queueRequest(-1, nil, nil, make(chan error, 1))
+	select {
+	case <-c.queueRequest(opClose, &closeRequest{}, &closeResponse{}):
+	case <-time.After(time.Second):
+	}
 }
 
+// opClose
 func (c *Conn) loop() {
 	for {
 		c.connect()
@@ -197,15 +201,14 @@ func (c *Conn) loop() {
 		c.setState(StateDisconnected)
 
 		// Yeesh
-		if !strings.Contains(err.Error(), "use of closed network connection") {
+		if err != io.EOF && err != ErrSessionExpired && !strings.Contains(err.Error(), "use of closed network connection") {
 			log.Println(err)
 		}
 
-		if err == ErrSessionExpired {
-			c.flushRequests(err)
-		} else {
-			c.flushRequests(ErrConnectionClosed)
+		if err != ErrSessionExpired {
+			err = ErrConnectionClosed
 		}
+		c.flushRequests(err)
 
 		if c.reconnectDelay > 0 {
 			select {
@@ -370,12 +373,6 @@ func (c *Conn) sendLoop(conn net.Conn, closeChan <-chan bool) error {
 	for {
 		select {
 		case req := <-c.sendChan:
-			if req.opcode < 0 {
-				// Asked to quit
-				req.recvChan <- nil
-				return nil
-			}
-
 			header := &requestHeader{req.xid, req.opcode}
 			n, err := encodePacket(buf[4:], header)
 			if err != nil {
@@ -526,6 +523,9 @@ func (c *Conn) recvLoop(conn net.Conn) error {
 					_, err = decodePacket(buf[16:16+blen], req.recvStruct)
 				}
 				req.recvChan <- err
+				if req.opcode == opClose {
+					return io.EOF
+				}
 			}
 		}
 	}
@@ -561,21 +561,20 @@ func (c *Conn) addWatcher(path string, watcherType watcherType) chan Event {
 	return ch
 }
 
-func (c *Conn) queueRequest(opcode int32, req interface{}, res interface{}, errChan chan error) {
+func (c *Conn) queueRequest(opcode int32, req interface{}, res interface{}) <-chan error {
 	rq := &request{
 		xid:        c.nextXid(),
 		opcode:     opcode,
 		pkt:        req,
 		recvStruct: res,
-		recvChan:   errChan,
+		recvChan:   make(chan error, 1),
 	}
 	c.sendChan <- rq
+	return rq.recvChan
 }
 
 func (c *Conn) request(opcode int32, req interface{}, res interface{}) error {
-	ch := make(chan error)
-	c.queueRequest(opcode, req, res, ch)
-	return <-ch
+	return <-c.queueRequest(opcode, req, res)
 }
 
 func (c *Conn) Children(path string) ([]string, *Stat, error) {

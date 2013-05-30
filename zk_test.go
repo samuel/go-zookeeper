@@ -95,7 +95,7 @@ func TestSetWatchers(t *testing.T) {
 		t.Fatal("Children should return at least 1 child")
 	}
 
-	zk.disconnect()
+	zk.conn.Close()
 	time.Sleep(time.Millisecond * 50)
 
 	if path, err := zk2.Create("/gozk-test", []byte{1, 2, 3, 4}, 0, WorldACL(PermAll)); err != nil {
@@ -139,7 +139,7 @@ func TestExpiringWatch(t *testing.T) {
 	}
 
 	zk.sessionId = 99999
-	zk.disconnect()
+	zk.conn.Close()
 
 	_ = childCh
 	select {
