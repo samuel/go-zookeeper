@@ -98,16 +98,14 @@ func (l *Lock) Lock() error {
 			break
 		}
 
-		exists, _, ch, err := l.c.ExistsW(l.path + "/" + prevSeqPath)
-		if err != nil {
+		_, _, ch, err := l.c.GetW(l.path + "/" + prevSeqPath)
+		if err != nil && err != ErrNoNode {
 			return err
 		}
 
-		if exists {
-			ev := <-ch
-			if ev.Err != nil {
-				return ev.Err
-			}
+		ev := <-ch
+		if ev.Err != nil {
+			return ev.Err
 		}
 	}
 

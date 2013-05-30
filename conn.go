@@ -31,16 +31,6 @@ var (
 	watcherTypeChild = watcherType(3)
 )
 
-func (t watcherType) matchesEvent(e EventType) bool {
-	if e == EventNodeCreated && t == watcherTypeExist {
-		return true
-	}
-	if (e == EventNodeDeleted || e == EventNodeDataChanged) && (t == watcherTypeExist || t == watcherTypeData) {
-		return true
-	}
-	return e == EventNodeChildrenChanged && t == watcherTypeChild
-}
-
 type watchers struct {
 	dataWatchers  []chan Event
 	existWatchers []chan Event
@@ -67,7 +57,7 @@ type Conn struct {
 	xid       int32
 	lastZxid  int64
 	sessionId int64
-	timeout   int32
+	timeout   int32 // session timeout in seconds
 	passwd    []byte
 
 	// Debug (used by unit tests)
@@ -117,8 +107,8 @@ func Connect(servers []string, recvTimeout time.Duration) (*Conn, <-chan Event, 
 	}
 	go func() {
 		conn.loop()
-		conn.flushRequests(ErrConnectionClosed)
-		conn.invalidateWatches(ErrConnectionClosed)
+		conn.flushRequests(ErrSessionExpired)
+		conn.invalidateWatches(ErrSessionExpired)
 	}()
 	return &conn, ec, nil
 }
@@ -598,6 +588,16 @@ func (c *Conn) Get(path string) ([]byte, *Stat, error) {
 	res := &getDataResponse{}
 	err := c.request(opGetData, &getDataRequest{Path: path, Watch: false}, res)
 	return res.Data, &res.Stat, err
+}
+
+func (c *Conn) GetW(path string) ([]byte, *Stat, <-chan Event, error) {
+	res := &getDataResponse{}
+	err := c.request(opExists, &getDataRequest{Path: path, Watch: true}, res)
+	var ech chan Event
+	if err == nil {
+		ech = c.addWatcher(path, watcherTypeData)
+	}
+	return res.Data, &res.Stat, ech, err
 }
 
 func (c *Conn) Set(path string, data []byte, version int32) (*Stat, error) {
