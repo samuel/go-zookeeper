@@ -178,14 +178,14 @@ func (c *Conn) loop() {
 		} else if err == nil {
 			closeChan := make(chan bool) // channel to tell send loop stop
 
-			sendDone := make(chan bool, 1) // channel signalling that send loop is done
+			sendDone := make(chan bool, 1) // channel signaling that send loop is done
 			go func() {
 				c.sendLoop(c.conn, closeChan)
 				c.conn.Close()  // causes recv loop to EOF/exit
 				close(sendDone) // tell recv loop we're done
 			}()
 
-			recvDone := make(chan bool, 1) // channel signalling that recv loop is done
+			recvDone := make(chan bool, 1) // channel signaling that recv loop is done
 			go func() {
 				err = c.recvLoop(c.conn)
 				if err == nil {
