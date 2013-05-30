@@ -197,14 +197,18 @@ func (c *Conn) loop() {
 		c.requests = make(map[int32]*request)
 		c.requestsLock.Unlock()
 
-		select {
-		case <-c.shouldQuit:
-			return
-		default:
-		}
-
 		if c.reconnectDelay > 0 {
-			time.Sleep(c.reconnectDelay)
+			select {
+			case <-c.shouldQuit:
+				return
+			case <-time.After(c.reconnectDelay):
+			}
+		} else {
+			select {
+			case <-c.shouldQuit:
+				return
+			default:
+			}
 		}
 	}
 }
