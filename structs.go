@@ -188,7 +188,7 @@ type setSaslResponse struct {
 }
 
 type setWatchesRequest struct {
-	RealtiveZxid int64
+	RelativeZxid int64
 	DataWatches  []string
 	ExistWatches []string
 	ChildWatches []string

@@ -31,14 +31,25 @@ var (
 	watcherTypeChild = watcherType(3)
 )
 
+type watcher struct {
+	ch   chan Event
+	zxid int64
+}
+
 type watchers struct {
-	dataWatchers  []chan Event
-	existWatchers []chan Event
-	childWatchers []chan Event
+	dataWatchers  []*watcher
+	existWatchers []*watcher
+	childWatchers []*watcher
 }
 
 type Conn struct {
-	state          State
+	lastZxid  int64 // must be 64-bit aligned
+	sessionId int64
+	state     State // must be 32-bit aligned
+	xid       int32
+	timeout   int32 // session timeout in seconds
+	passwd    []byte
+
 	servers        []string
 	serverIndex    int
 	conn           net.Conn
@@ -54,12 +65,6 @@ type Conn struct {
 	watchers     map[string]*watchers
 	watchersLock sync.Mutex
 
-	xid       int32
-	lastZxid  int64
-	sessionId int64
-	timeout   int32 // session timeout in seconds
-	passwd    []byte
-
 	// Debug (used by unit tests)
 	reconnectDelay time.Duration
 }
@@ -69,7 +74,12 @@ type request struct {
 	opcode     int32
 	pkt        interface{}
 	recvStruct interface{}
-	recvChan   chan error
+	recvChan   chan response
+}
+
+type response struct {
+	zxid int64
+	err  error
 }
 
 type Event struct {
@@ -133,6 +143,14 @@ func (c *Conn) setState(state State) {
 	default:
 		// panic("zk: event channel full - it must be monitored and never allowed to be full")
 	}
+}
+
+func (c *Conn) zxid() int64 {
+	return atomic.LoadInt64(&c.lastZxid)
+}
+
+func (c *Conn) setZxid(zxid int64) {
+	atomic.StoreInt64(&c.lastZxid, zxid)
 }
 
 func (c *Conn) connect() {
@@ -221,7 +239,7 @@ func (c *Conn) flushRequests(err error) {
 	c.requestsLock.Lock()
 	// Error out any pending requests
 	for _, req := range c.requests {
-		req.recvChan <- err
+		req.recvChan <- response{-1, err}
 	}
 	c.requests = make(map[int32]*request)
 	c.requestsLock.Unlock()
@@ -234,14 +252,14 @@ func (c *Conn) invalidateWatches(err error) {
 	if len(c.watchers) >= 0 {
 		for path, wat := range c.watchers {
 			ev := Event{Type: EventNotWatching, State: StateDisconnected, Path: path, Err: err}
-			for _, ch := range wat.dataWatchers {
-				ch <- ev
+			for _, w := range wat.dataWatchers {
+				w.ch <- ev
 			}
-			for _, ch := range wat.childWatchers {
-				ch <- ev
+			for _, w := range wat.childWatchers {
+				w.ch <- ev
 			}
-			for _, ch := range wat.existWatchers {
-				ch <- ev
+			for _, w := range wat.existWatchers {
+				w.ch <- ev
 			}
 		}
 		c.watchers = make(map[string]*watchers, 0)
@@ -257,7 +275,7 @@ func (c *Conn) sendSetWatches() {
 	}
 
 	req := &setWatchesRequest{
-		RealtiveZxid: c.lastZxid,
+		RelativeZxid: c.zxid(),
 		DataWatches:  make([]string, 0),
 		ExistWatches: make([]string, 0),
 		ChildWatches: make([]string, 0),
@@ -283,7 +301,7 @@ func (c *Conn) sendSetWatches() {
 
 	go func() {
 		res := &setWatchesResponse{}
-		err := c.request(opSetWatches, req, res)
+		_, err := c.request(opSetWatches, req, res)
 		if err != nil {
 			log.Fatal(err)
 		}
@@ -297,7 +315,7 @@ func (c *Conn) authenticate() error {
 
 	n, err := encodePacket(buf[4:], &connectRequest{
 		ProtocolVersion: protocolVersion,
-		LastZxidSeen:    c.lastZxid,
+		LastZxidSeen:    c.zxid(),
 		TimeOut:         c.timeout,
 		SessionId:       c.sessionId,
 		Passwd:          c.passwd,
@@ -367,13 +385,13 @@ func (c *Conn) sendLoop(conn net.Conn, closeChan <-chan bool) error {
 			header := &requestHeader{req.xid, req.opcode}
 			n, err := encodePacket(buf[4:], header)
 			if err != nil {
-				req.recvChan <- err
+				req.recvChan <- response{-1, err}
 				continue
 			}
 
 			n2, err := encodePacket(buf[4+n:], req.pkt)
 			if err != nil {
-				req.recvChan <- err
+				req.recvChan <- response{-1, err}
 				continue
 			}
 
@@ -384,7 +402,7 @@ func (c *Conn) sendLoop(conn net.Conn, closeChan <-chan bool) error {
 			c.requestsLock.Lock()
 			select {
 			case <-closeChan:
-				req.recvChan <- ErrConnectionClosed
+				req.recvChan <- response{-1, ErrConnectionClosed}
 				c.requestsLock.Unlock()
 				return ErrConnectionClosed
 			default:
@@ -394,7 +412,7 @@ func (c *Conn) sendLoop(conn net.Conn, closeChan <-chan bool) error {
 
 			_, err = conn.Write(buf[:n+4])
 			if err != nil {
-				req.recvChan <- err
+				req.recvChan <- response{-1, err}
 				conn.Close()
 				return err
 			}
@@ -416,6 +434,21 @@ func (c *Conn) sendLoop(conn net.Conn, closeChan <-chan bool) error {
 		}
 	}
 	panic("not reached")
+}
+
+func signalWatchers(watchers []*watcher, zxid int64, ev Event) []*watcher {
+	n := len(watchers)
+	for i := 0; i < n; {
+		w := watchers[i]
+		if w.zxid > 0 && w.zxid <= zxid {
+			watchers[i] = watchers[n-1]
+			n--
+			w.ch <- ev
+		} else {
+			i++
+		}
+	}
+	return watchers[:n]
 }
 
 func (c *Conn) recvLoop(conn net.Conn) error {
@@ -463,26 +496,15 @@ func (c *Conn) recvLoop(conn net.Conn) error {
 			}
 			c.watchersLock.Lock()
 			if wat := c.watchers[res.Path]; wat != nil {
+				zxid := c.zxid()
 				switch res.Type {
 				case EventNodeCreated:
-					for _, ch := range wat.existWatchers {
-						ch <- ev
-					}
-					wat.existWatchers = wat.existWatchers[:0]
+					wat.existWatchers = signalWatchers(wat.existWatchers, zxid, ev)
 				case EventNodeDeleted, EventNodeDataChanged:
-					for _, ch := range wat.existWatchers {
-						ch <- ev
-					}
-					for _, ch := range wat.dataWatchers {
-						ch <- ev
-					}
-					wat.existWatchers = wat.existWatchers[:0]
-					wat.dataWatchers = wat.dataWatchers[:0]
+					wat.existWatchers = signalWatchers(wat.existWatchers, zxid, ev)
+					wat.dataWatchers = signalWatchers(wat.dataWatchers, zxid, ev)
 				case EventNodeChildrenChanged:
-					for _, ch := range wat.childWatchers {
-						ch <- ev
-					}
-					wat.childWatchers = wat.childWatchers[:0]
+					wat.childWatchers = signalWatchers(wat.childWatchers, zxid, ev)
 				}
 				if len(wat.childWatchers)+len(wat.dataWatchers)+len(wat.existWatchers) == 0 {
 					delete(c.watchers, res.Path)
@@ -495,7 +517,7 @@ func (c *Conn) recvLoop(conn net.Conn) error {
 			log.Printf("Xid < 0 (%d) but not ping or watcher event", res.Xid)
 		} else {
 			if res.Zxid > 0 {
-				c.lastZxid = res.Zxid
+				c.setZxid(res.Zxid)
 			}
 
 			c.requestsLock.Lock()
@@ -513,7 +535,7 @@ func (c *Conn) recvLoop(conn net.Conn) error {
 				} else {
 					_, err = decodePacket(buf[16:16+blen], req.recvStruct)
 				}
-				req.recvChan <- err
+				req.recvChan <- response{res.Zxid, err}
 				if req.opcode == opClose {
 					return io.EOF
 				}
@@ -527,7 +549,7 @@ func (c *Conn) nextXid() int32 {
 	return atomic.AddInt32(&c.xid, 1)
 }
 
-func (c *Conn) addWatcher(path string, watcherType watcherType) chan Event {
+func (c *Conn) addWatcher(path string, watcherType watcherType, zxid int64) *watcher {
 	c.watchersLock.Lock()
 	defer c.watchersLock.Unlock()
 
@@ -535,84 +557,128 @@ func (c *Conn) addWatcher(path string, watcherType watcherType) chan Event {
 	wat := c.watchers[path]
 	if wat == nil {
 		wat = &watchers{
-			dataWatchers:  make([]chan Event, 0),
-			existWatchers: make([]chan Event, 0),
-			childWatchers: make([]chan Event, 0),
+			dataWatchers:  make([]*watcher, 0),
+			existWatchers: make([]*watcher, 0),
+			childWatchers: make([]*watcher, 0),
 		}
 		c.watchers[path] = wat
 	}
+	w := &watcher{ch, zxid}
 	switch watcherType {
 	case watcherTypeChild:
-		wat.childWatchers = append(wat.childWatchers, ch)
+		wat.childWatchers = append(wat.childWatchers, w)
 	case watcherTypeData:
-		wat.dataWatchers = append(wat.dataWatchers, ch)
+		wat.dataWatchers = append(wat.dataWatchers, w)
 	case watcherTypeExist:
-		wat.existWatchers = append(wat.existWatchers, ch)
+		wat.existWatchers = append(wat.existWatchers, w)
 	}
-	return ch
+	return w
 }
 
-func (c *Conn) queueRequest(opcode int32, req interface{}, res interface{}) <-chan error {
+func removeWatcherFromList(watchers []*watcher, w *watcher) ([]*watcher, bool) {
+	for i := 0; i < len(watchers); i++ {
+		if watchers[i] == w {
+			watchers[i] = watchers[len(watchers)-1]
+			return watchers[:len(watchers)-1], true
+		}
+	}
+	return watchers, false
+}
+
+func (c *Conn) removeWatcher(path string, watcherType watcherType, w *watcher) bool {
+	c.watchersLock.Lock()
+	defer c.watchersLock.Unlock()
+
+	wat := c.watchers[path]
+	if wat == nil {
+		return false
+	}
+
+	found := false
+	switch watcherType {
+	case watcherTypeChild:
+		wat.childWatchers, found = removeWatcherFromList(wat.childWatchers, w)
+	case watcherTypeData:
+		wat.dataWatchers, found = removeWatcherFromList(wat.dataWatchers, w)
+	case watcherTypeExist:
+		wat.existWatchers, found = removeWatcherFromList(wat.existWatchers, w)
+	}
+	return found
+}
+
+func (c *Conn) updateWatcherZxid(w *watcher, zxid int64) {
+	c.watchersLock.Lock()
+	w.zxid = zxid
+	c.watchersLock.Unlock()
+}
+
+func (c *Conn) queueRequest(opcode int32, req interface{}, res interface{}) <-chan response {
 	rq := &request{
 		xid:        c.nextXid(),
 		opcode:     opcode,
 		pkt:        req,
 		recvStruct: res,
-		recvChan:   make(chan error, 1),
+		recvChan:   make(chan response, 1),
 	}
 	c.sendChan <- rq
 	return rq.recvChan
 }
 
-func (c *Conn) request(opcode int32, req interface{}, res interface{}) error {
-	return <-c.queueRequest(opcode, req, res)
+func (c *Conn) request(opcode int32, req interface{}, res interface{}) (int64, error) {
+	r := <-c.queueRequest(opcode, req, res)
+	return r.zxid, r.err
 }
 
 func (c *Conn) AddAuth(scheme string, auth []byte) error {
-	return c.request(opSetAuth, &setAuthRequest{Type: 0, Scheme: scheme, Auth: auth}, &setAuthResponse{})
+	_, err := c.request(opSetAuth, &setAuthRequest{Type: 0, Scheme: scheme, Auth: auth}, &setAuthResponse{})
+	return err
 }
 
 func (c *Conn) Children(path string) ([]string, *Stat, error) {
 	res := &getChildren2Response{}
-	err := c.request(opGetChildren2, &getChildren2Request{Path: path, Watch: false}, res)
+	_, err := c.request(opGetChildren2, &getChildren2Request{Path: path, Watch: false}, res)
 	return res.Children, &res.Stat, err
 }
 
 func (c *Conn) ChildrenW(path string) ([]string, *Stat, <-chan Event, error) {
+	w := c.addWatcher(path, watcherTypeChild, -1)
 	res := &getChildren2Response{}
-	err := c.request(opGetChildren2, &getChildren2Request{Path: path, Watch: true}, res)
-	var ech chan Event
-	if err == nil {
-		ech = c.addWatcher(path, watcherTypeChild)
+	zxid, err := c.request(opGetChildren2, &getChildren2Request{Path: path, Watch: true}, res)
+	if err != nil {
+		c.removeWatcher(path, watcherTypeChild, w)
+		return nil, nil, nil, err
 	}
-	return res.Children, &res.Stat, ech, err
+	c.updateWatcherZxid(w, zxid)
+	return res.Children, &res.Stat, w.ch, err
 }
 
 func (c *Conn) Get(path string) ([]byte, *Stat, error) {
 	res := &getDataResponse{}
-	err := c.request(opGetData, &getDataRequest{Path: path, Watch: false}, res)
+	_, err := c.request(opGetData, &getDataRequest{Path: path, Watch: false}, res)
 	return res.Data, &res.Stat, err
 }
 
 func (c *Conn) GetW(path string) ([]byte, *Stat, <-chan Event, error) {
+	w := c.addWatcher(path, watcherTypeData, -1)
 	res := &getDataResponse{}
-	err := c.request(opGetData, &getDataRequest{Path: path, Watch: true}, res)
-	var ech chan Event
-	if err == nil {
-		ech = c.addWatcher(path, watcherTypeData)
+	zxid, err := c.request(opGetData, &getDataRequest{Path: path, Watch: true}, res)
+	if err != nil {
+		c.removeWatcher(path, watcherTypeData, w)
+		return nil, nil, nil, err
 	}
-	return res.Data, &res.Stat, ech, err
+	c.updateWatcherZxid(w, zxid)
+	return res.Data, &res.Stat, w.ch, err
 }
 
 func (c *Conn) Set(path string, data []byte, version int32) (*Stat, error) {
 	res := &setDataResponse{}
-	err := c.request(opSetData, &SetDataRequest{path, data, version}, res)
+	_, err := c.request(opSetData, &SetDataRequest{path, data, version}, res)
 	return &res.Stat, err
 }
 
 func (c *Conn) Create(path string, data []byte, flags int32, acl []ACL) (string, error) {
 	res := &createResponse{}
-	err := c.request(opCreate, &CreateRequest{path, data, acl, flags}, res)
+	_, err := c.request(opCreate, &CreateRequest{path, data, acl, flags}, res)
 	return res.Path, err
 }
 
@@ -630,9 +696,8 @@ func (c *Conn) CreateProtectedEphemeralSequential(path string, data []byte, acl 
 	rootPath := strings.Join(parts[:len(parts)-1], "/")
 	protectedPath := strings.Join(parts, "/")
 
-	res := &createResponse{}
 	for i := 0; i < 3; i++ {
-		err = c.request(opCreate, &CreateRequest{protectedPath, data, acl, FlagEphemeral | FlagSequence}, res)
+		newPath, err := c.Create(protectedPath, data, FlagEphemeral|FlagSequence, acl)
 		switch err {
 		case ErrSessionExpired:
 			// No need to search for the node since it can't exist. Just try again.
@@ -650,7 +715,7 @@ func (c *Conn) CreateProtectedEphemeralSequential(path string, data []byte, acl 
 				}
 			}
 		case nil:
-			return res.Path, nil
+			return newPath, nil
 		default:
 			return "", err
 		}
@@ -659,13 +724,13 @@ func (c *Conn) CreateProtectedEphemeralSequential(path string, data []byte, acl 
 }
 
 func (c *Conn) Delete(path string, version int32) error {
-	res := &deleteResponse{}
-	return c.request(opDelete, &DeleteRequest{path, version}, res)
+	_, err := c.request(opDelete, &DeleteRequest{path, version}, &deleteResponse{})
+	return err
 }
 
 func (c *Conn) Exists(path string) (bool, *Stat, error) {
 	res := &existsResponse{}
-	err := c.request(opExists, &existsRequest{Path: path, Watch: false}, res)
+	_, err := c.request(opExists, &existsRequest{Path: path, Watch: false}, res)
 	exists := true
 	if err == ErrNoNode {
 		exists = false
@@ -675,39 +740,48 @@ func (c *Conn) Exists(path string) (bool, *Stat, error) {
 }
 
 func (c *Conn) ExistsW(path string) (bool, *Stat, <-chan Event, error) {
+	w1 := c.addWatcher(path, watcherTypeData, -1)
+	w2 := c.addWatcher(path, watcherTypeExist, -1)
 	res := &existsResponse{}
-	err := c.request(opExists, &existsRequest{Path: path, Watch: true}, res)
+	zxid, err := c.request(opExists, &existsRequest{Path: path, Watch: true}, res)
 	exists := true
 	if err == ErrNoNode {
 		exists = false
 		err = nil
 	}
-	var ech chan Event
-	if err == nil {
-		if exists {
-			ech = c.addWatcher(path, watcherTypeData)
-		} else {
-			ech = c.addWatcher(path, watcherTypeExist)
-		}
+	if err != nil {
+		c.removeWatcher(path, watcherTypeData, w1)
+		c.removeWatcher(path, watcherTypeExist, w2)
+		return false, nil, nil, err
 	}
-	return exists, &res.Stat, ech, err
+	var w *watcher
+	if exists {
+		c.removeWatcher(path, watcherTypeExist, w2)
+		c.updateWatcherZxid(w1, zxid)
+		w = w1
+	} else {
+		c.removeWatcher(path, watcherTypeExist, w1)
+		c.updateWatcherZxid(w2, zxid)
+		w = w2
+	}
+	return exists, &res.Stat, w.ch, err
 }
 
 func (c *Conn) GetACL(path string) ([]ACL, *Stat, error) {
 	res := &getAclResponse{}
-	err := c.request(opGetAcl, &getAclRequest{Path: path}, res)
+	_, err := c.request(opGetAcl, &getAclRequest{Path: path}, res)
 	return res.Acl, &res.Stat, err
 }
 
 func (c *Conn) SetACL(path string, acl []ACL, version int32) (*Stat, error) {
 	res := &setAclResponse{}
-	err := c.request(opSetAcl, &setAclRequest{Path: path, Acl: acl, Version: version}, res)
+	_, err := c.request(opSetAcl, &setAclRequest{Path: path, Acl: acl, Version: version}, res)
 	return &res.Stat, err
 }
 
 func (c *Conn) Sync(path string) (string, error) {
 	res := &syncResponse{}
-	err := c.request(opSync, &syncRequest{Path: path}, res)
+	_, err := c.request(opSync, &syncRequest{Path: path}, res)
 	return res.Path, err
 }
 
@@ -736,6 +810,6 @@ func (c *Conn) Multi(ops MultiOps) error {
 		req.Ops = append(req.Ops, multiRequestOp{multiHeader{opCheck, false, -1}, r})
 	}
 	res := &multiResponse{}
-	err := c.request(opMulti, req, res)
+	_, err := c.request(opMulti, req, res)
 	return err
 }
