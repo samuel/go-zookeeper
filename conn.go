@@ -124,8 +124,12 @@ func Connect(servers []string, recvTimeout time.Duration) (*Conn, <-chan Event, 
 }
 
 func (c *Conn) Close() {
-	c.disconnect()
 	close(c.shouldQuit)
+
+	select {
+	case <-c.queueRequest(opClose, &closeRequest{}, &closeResponse{}):
+	case <-time.After(time.Second):
+	}
 }
 
 func (c *Conn) State() State {
@@ -158,13 +162,6 @@ func (c *Conn) connect() {
 		if c.serverIndex == startIndex {
 			time.Sleep(time.Second)
 		}
-	}
-}
-
-func (c *Conn) disconnect() {
-	select {
-	case <-c.queueRequest(opClose, &closeRequest{}, &closeResponse{}):
-	case <-time.After(time.Second):
 	}
 }
 
