@@ -100,6 +100,8 @@ func (s State) String() string {
 type ErrCode int32
 
 var (
+	ErrConnectionClosed = errors.New("zk: connection closed")
+
 	ErrUnknown                 = errors.New("zk: unknown error")
 	ErrApiError                = errors.New("zk: api error")
 	ErrNoNode                  = errors.New("zk: node does not exist")
@@ -108,14 +110,14 @@ var (
 	ErrNoChildrenForEphemerals = errors.New("zk: ephemeral nodes may not have children")
 	ErrNodeExists              = errors.New("zk: node already exists")
 	ErrNotEmpty                = errors.New("zk: node has children")
-	// ErrSessionExpired          = errors.New("zk: session has been expired by the server")
-	ErrInvalidCallback = errors.New("zk: invalid callback specified")
-	ErrInvalidACL      = errors.New("zk: invalid ACL specified")
-	ErrAuthFailed      = errors.New("zk: client authentication failed")
-	ErrClosing         = errors.New("zk: zookeeper is closing")
-	ErrNothing         = errors.New("zk: no server responsees to process")
-	ErrSessionMoved    = errors.New("zk: session moved to another server, so operation is ignored")
-	errCodeToError     = map[ErrCode]error{
+	ErrSessionExpired          = errors.New("zk: session has been expired by the server")
+	ErrInvalidCallback         = errors.New("zk: invalid callback specified")
+	ErrInvalidACL              = errors.New("zk: invalid ACL specified")
+	ErrAuthFailed              = errors.New("zk: client authentication failed")
+	ErrClosing                 = errors.New("zk: zookeeper is closing")
+	ErrNothing                 = errors.New("zk: no server responsees to process")
+	ErrSessionMoved            = errors.New("zk: session moved to another server, so operation is ignored")
+	errCodeToError             = map[ErrCode]error{
 		0:                          nil,
 		errApiError:                ErrApiError,
 		errNoNode:                  ErrNoNode,

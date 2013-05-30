@@ -21,11 +21,6 @@ const (
 	sendChanSize  = 16
 )
 
-var (
-	ErrConnectionClosed = errors.New("zk: connection closed")
-	ErrSessionExpired   = errors.New("zk: session expired")
-)
-
 type watcherType int
 
 var (
