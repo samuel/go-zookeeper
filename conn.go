@@ -1,6 +1,10 @@
 package zk
 
-// TODO: make sure a ping response comes back in a reasonable time
+/*
+TODO:
+* make sure a ping response comes back in a reasonable time
+* timeouts on network calls
+*/
 
 import (
 	"crypto/rand"
@@ -165,7 +169,6 @@ func (c *Conn) connect() {
 	}
 }
 
-// opClose
 func (c *Conn) loop() {
 	for {
 		c.connect()
@@ -227,9 +230,9 @@ func (c *Conn) loop() {
 	}
 }
 
+// Send error to all pending requests and clear request map
 func (c *Conn) flushRequests(err error) {
 	c.requestsLock.Lock()
-	// Error out any pending requests
 	for _, req := range c.requests {
 		req.recvChan <- response{-1, err}
 	}
@@ -237,6 +240,7 @@ func (c *Conn) flushRequests(err error) {
 	c.requestsLock.Unlock()
 }
 
+// Send error to all watchers and clear watchers map
 func (c *Conn) invalidateWatches(err error) {
 	c.watchersLock.Lock()
 	defer c.watchersLock.Unlock()
