@@ -46,37 +46,9 @@ func trace(conn1, conn2 net.Conn, client bool) {
 				requestsLock.Lock()
 				requests[xid] = opcode
 				requestsLock.Unlock()
-				switch opcode {
-				default:
+				cr = requestStructForOp(opcode)
+				if cr == nil {
 					fmt.Printf("Unknown opcode %d\n", opcode)
-				case opClose:
-					cr = &closeRequest{}
-				case opCreate:
-					cr = &createRequest{}
-				case opDelete:
-					cr = &deleteRequest{}
-				case opExists:
-					cr = &existsRequest{}
-				case opGetAcl:
-					cr = &getAclRequest{}
-				case opGetChildren:
-					cr = &getChildrenRequest{}
-				case opGetChildren2:
-					cr = &getChildren2Request{}
-				case opGetData:
-					cr = &getDataRequest{}
-				case opPing:
-					cr = &pingRequest{}
-				case opSetAcl:
-					cr = &setAclRequest{}
-				case opSetData:
-					cr = &setDataRequest{}
-				case opSetWatches:
-					cr = &setWatchesRequest{}
-				case opSync:
-					cr = &syncRequest{}
-				case opSetAuth:
-					cr = &setAuthRequest{}
 				}
 			}
 		} else {
@@ -100,39 +72,9 @@ func trace(conn1, conn2 net.Conn, client bool) {
 				} else {
 					opcode = opWatcherEvent
 				}
-				switch opcode {
-				default:
+				cr = responseStructForOp(opcode)
+				if cr == nil {
 					fmt.Printf("Unknown opcode %d\n", opcode)
-				case opClose:
-					cr = &closeResponse{}
-				case opCreate:
-					cr = &createResponse{}
-				case opDelete:
-					cr = &deleteResponse{}
-				case opExists:
-					cr = &existsResponse{}
-				case opGetAcl:
-					cr = &getAclResponse{}
-				case opGetChildren:
-					cr = &getChildrenResponse{}
-				case opGetChildren2:
-					cr = &getChildren2Response{}
-				case opGetData:
-					cr = &getDataResponse{}
-				case opPing:
-					cr = &pingResponse{}
-				case opSetAcl:
-					cr = &setAclResponse{}
-				case opSetData:
-					cr = &setDataResponse{}
-				case opSetWatches:
-					cr = &setWatchesResponse{}
-				case opSync:
-					cr = &syncResponse{}
-				case opWatcherEvent:
-					cr = &watcherEvent{}
-				case opSetAuth:
-					cr = &setAuthResponse{}
 				}
 				if errnum != 0 {
 					cr = &struct{}{}

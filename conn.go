@@ -606,13 +606,13 @@ func (c *Conn) GetW(path string) ([]byte, *Stat, <-chan Event, error) {
 
 func (c *Conn) Set(path string, data []byte, version int32) (*Stat, error) {
 	res := &setDataResponse{}
-	err := c.request(opSetData, &setDataRequest{path, data, version}, res)
+	err := c.request(opSetData, &SetDataRequest{path, data, version}, res)
 	return &res.Stat, err
 }
 
 func (c *Conn) Create(path string, data []byte, flags int32, acl []ACL) (string, error) {
 	res := &createResponse{}
-	err := c.request(opCreate, &createRequest{path, data, acl, flags}, res)
+	err := c.request(opCreate, &CreateRequest{path, data, acl, flags}, res)
 	return res.Path, err
 }
 
@@ -632,7 +632,7 @@ func (c *Conn) CreateProtectedEphemeralSequential(path string, data []byte, acl 
 
 	res := &createResponse{}
 	for i := 0; i < 3; i++ {
-		err = c.request(opCreate, &createRequest{protectedPath, data, acl, FlagEphemeral | FlagSequence}, res)
+		err = c.request(opCreate, &CreateRequest{protectedPath, data, acl, FlagEphemeral | FlagSequence}, res)
 		switch err {
 		case ErrSessionExpired:
 			// No need to search for the node since it can't exist. Just try again.
@@ -660,7 +660,7 @@ func (c *Conn) CreateProtectedEphemeralSequential(path string, data []byte, acl 
 
 func (c *Conn) Delete(path string, version int32) error {
 	res := &deleteResponse{}
-	return c.request(opDelete, &deleteRequest{path, version}, res)
+	return c.request(opDelete, &DeleteRequest{path, version}, res)
 }
 
 func (c *Conn) Exists(path string) (bool, *Stat, error) {
@@ -703,4 +703,39 @@ func (c *Conn) SetACL(path string, acl []ACL, version int32) (*Stat, error) {
 	res := &setAclResponse{}
 	err := c.request(opSetAcl, &setAclRequest{Path: path, Acl: acl, Version: version}, res)
 	return &res.Stat, err
+}
+
+func (c *Conn) Sync(path string) (string, error) {
+	res := &syncResponse{}
+	err := c.request(opSync, &syncRequest{Path: path}, res)
+	return res.Path, err
+}
+
+type MultiOps struct {
+	Create  []CreateRequest
+	Delete  []DeleteRequest
+	SetData []SetDataRequest
+	Check   []CheckVersionRequest
+}
+
+func (c *Conn) Multi(ops MultiOps) error {
+	req := &multiRequest{
+		Ops:        make([]multiRequestOp, 0, len(ops.Create)+len(ops.Delete)+len(ops.SetData)+len(ops.Check)),
+		DoneHeader: multiHeader{Type: -1, Done: true, Err: -1},
+	}
+	for _, r := range ops.Create {
+		req.Ops = append(req.Ops, multiRequestOp{multiHeader{opCreate, false, -1}, r})
+	}
+	for _, r := range ops.SetData {
+		req.Ops = append(req.Ops, multiRequestOp{multiHeader{opSetData, false, -1}, r})
+	}
+	for _, r := range ops.Delete {
+		req.Ops = append(req.Ops, multiRequestOp{multiHeader{opDelete, false, -1}, r})
+	}
+	for _, r := range ops.Check {
+		req.Ops = append(req.Ops, multiRequestOp{multiHeader{opCheck, false, -1}, r})
+	}
+	res := &multiResponse{}
+	err := c.request(opMulti, req, res)
+	return err
 }
