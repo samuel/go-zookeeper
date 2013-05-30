@@ -118,7 +118,11 @@ func Connect(servers []string, recvTimeout time.Duration) (*Conn, <-chan Event, 
 		// Debug
 		reconnectDelay: 0,
 	}
-	go conn.loop()
+	go func() {
+		conn.loop()
+		conn.flushRequests(ErrConnectionClosed)
+		conn.invalidateWatches(ErrConnectionClosed)
+	}()
 	return &conn, ec, nil
 }
 
@@ -157,7 +161,7 @@ func (c *Conn) loop() {
 		c.connect()
 		err := c.authenticate()
 		if err == ErrSessionExpired {
-			c.invalidateWatches()
+			c.invalidateWatches(err)
 		} else if err == nil {
 			closeChan := make(chan bool)
 			sendDone := make(chan bool, 1)
@@ -189,13 +193,7 @@ func (c *Conn) loop() {
 			log.Println(err)
 		}
 
-		c.requestsLock.Lock()
-		// Error out any pending requests
-		for _, req := range c.requests {
-			req.recvChan <- err
-		}
-		c.requests = make(map[int32]*request)
-		c.requestsLock.Unlock()
+		c.flushRequests(err)
 
 		if c.reconnectDelay > 0 {
 			select {
@@ -213,13 +211,23 @@ func (c *Conn) loop() {
 	}
 }
 
-func (c *Conn) invalidateWatches() {
+func (c *Conn) flushRequests(err error) {
+	c.requestsLock.Lock()
+	// Error out any pending requests
+	for _, req := range c.requests {
+		req.recvChan <- err
+	}
+	c.requests = make(map[int32]*request)
+	c.requestsLock.Unlock()
+}
+
+func (c *Conn) invalidateWatches(err error) {
 	c.watchersLock.Lock()
 	defer c.watchersLock.Unlock()
 
 	if len(c.watchers) >= 0 {
 		for path, wat := range c.watchers {
-			ev := Event{EventSession, c.state, path, ErrSessionExpired}
+			ev := Event{EventSession, c.state, path, err}
 			for _, ch := range wat.dataWatchers {
 				ch <- ev
 			}
