@@ -682,7 +682,10 @@ func (c *Conn) Create(path string, data []byte, flags int32, acl []ACL) (string,
 	return res.Path, err
 }
 
-// Fixes a hole if the server crashes after it creates the node
+// Fixes a race condition if the server crashes after it creates the node. On
+// reconnect the session may still be valid so the ephemeral node still exists.
+// Therefore, on reconnect we need to check if a node with a GUID generated on
+// create exists.
 func (c *Conn) CreateProtectedEphemeralSequential(path string, data []byte, acl []ACL) (string, error) {
 	var guid [16]byte
 	_, err := io.ReadFull(rand.Reader, guid[:16])
