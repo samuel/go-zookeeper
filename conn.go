@@ -601,14 +601,21 @@ func (c *Conn) Delete(path string, version int32) error {
 	return c.request(opDelete, &deleteRequest{path, version}, res)
 }
 
-func (c *Conn) ExistsW(path string) (*Stat, <-chan Event, error) {
+func (c *Conn) ExistsW(path string) (bool, *Stat, <-chan Event, error) {
 	res := &existsResponse{}
 	err := c.request(opExists, &existsRequest{Path: path, Watch: true}, res)
+	exists := true
+	if err == ErrNoNode {
+		exists = false
+		err = nil
+	}
 	var ech chan Event
 	if err == nil {
-		ech = c.addWatcher(path, watcherTypeData)
-	} else if err == ErrNoNode {
-		ech = c.addWatcher(path, watcherTypeExist)
+		if exists {
+			ech = c.addWatcher(path, watcherTypeData)
+		} else {
+			ech = c.addWatcher(path, watcherTypeExist)
+		}
 	}
-	return &res.Stat, ech, err
+	return exists, &res.Stat, ech, err
 }
