@@ -35,10 +35,9 @@ var (
 	watcherTypeChild = watcherType(3)
 )
 
-type watchers struct {
-	dataWatchers  []chan Event
-	existWatchers []chan Event
-	childWatchers []chan Event
+type watchPathType struct {
+	path  string
+	wType watcherType
 }
 
 type Conn struct {
@@ -61,7 +60,7 @@ type Conn struct {
 	sendChan     chan *request
 	requests     map[int32]*request // Xid -> pending request
 	requestsLock sync.Mutex
-	watchers     map[string]*watchers
+	watchers     map[watchPathType][]chan Event
 	watchersLock sync.Mutex
 
 	// Debug (used by unit tests)
@@ -116,7 +115,7 @@ func Connect(servers []string, recvTimeout time.Duration) (*Conn, <-chan Event, 
 		connectTimeout: 1 * time.Second,
 		sendChan:       make(chan *request, sendChanSize),
 		requests:       make(map[int32]*request),
-		watchers:       make(map[string]*watchers),
+		watchers:       make(map[watchPathType][]chan Event),
 		passwd:         emptyPassword,
 		timeout:        30000,
 
@@ -250,19 +249,13 @@ func (c *Conn) invalidateWatches(err error) {
 	defer c.watchersLock.Unlock()
 
 	if len(c.watchers) >= 0 {
-		for path, wat := range c.watchers {
-			ev := Event{Type: EventNotWatching, State: StateDisconnected, Path: path, Err: err}
-			for _, ch := range wat.dataWatchers {
-				ch <- ev
-			}
-			for _, ch := range wat.childWatchers {
-				ch <- ev
-			}
-			for _, ch := range wat.existWatchers {
+		for pathType, watchers := range c.watchers {
+			ev := Event{Type: EventNotWatching, State: StateDisconnected, Path: pathType.path, Err: err}
+			for _, ch := range watchers {
 				ch <- ev
 			}
 		}
-		c.watchers = make(map[string]*watchers, 0)
+		c.watchers = make(map[watchPathType][]chan Event)
 	}
 }
 
@@ -281,19 +274,19 @@ func (c *Conn) sendSetWatches() {
 		ChildWatches: make([]string, 0),
 	}
 	n := 0
-	for path, watchers := range c.watchers {
-		if len(watchers.dataWatchers) != 0 {
-			req.DataWatches = append(req.DataWatches, path)
-			n++
+	for pathType, watchers := range c.watchers {
+		if len(watchers) == 0 {
+			continue
 		}
-		if len(watchers.existWatchers) != 0 {
-			req.ExistWatches = append(req.ExistWatches, path)
-			n++
+		switch pathType.wType {
+		case watcherTypeData:
+			req.DataWatches = append(req.DataWatches, pathType.path)
+		case watcherTypeExist:
+			req.ExistWatches = append(req.ExistWatches, pathType.path)
+		case watcherTypeChild:
+			req.ChildWatches = append(req.ChildWatches, pathType.path)
 		}
-		if len(watchers.childWatchers) != 0 {
-			req.ChildWatches = append(req.ChildWatches, path)
-			n++
-		}
+		n++
 	}
 	if n == 0 {
 		return
@@ -480,31 +473,23 @@ func (c *Conn) recvLoop(conn net.Conn) error {
 			case c.eventChan <- ev:
 			default:
 			}
+			wTypes := make([]watcherType, 0, 2)
+			switch res.Type {
+			case EventNodeCreated:
+				wTypes = append(wTypes, watcherTypeExist)
+			case EventNodeDeleted, EventNodeDataChanged:
+				wTypes = append(wTypes, watcherTypeExist, watcherTypeData)
+			case EventNodeChildrenChanged:
+				wTypes = append(wTypes, watcherTypeChild)
+			}
 			c.watchersLock.Lock()
-			if wat := c.watchers[res.Path]; wat != nil {
-				switch res.Type {
-				case EventNodeCreated:
-					for _, ch := range wat.existWatchers {
+			for _, t := range wTypes {
+				wpt := watchPathType{res.Path, t}
+				if watchers := c.watchers[wpt]; watchers != nil && len(watchers) > 0 {
+					for _, ch := range watchers {
 						ch <- ev
 					}
-					wat.existWatchers = wat.existWatchers[:0]
-				case EventNodeDeleted, EventNodeDataChanged:
-					for _, ch := range wat.existWatchers {
-						ch <- ev
-					}
-					wat.existWatchers = wat.existWatchers[:0]
-					for _, ch := range wat.dataWatchers {
-						ch <- ev
-					}
-					wat.dataWatchers = wat.dataWatchers[:0]
-				case EventNodeChildrenChanged:
-					for _, ch := range wat.childWatchers {
-						ch <- ev
-					}
-					wat.childWatchers = wat.childWatchers[:0]
-				}
-				if len(wat.childWatchers)+len(wat.dataWatchers)+len(wat.existWatchers) == 0 {
-					delete(c.watchers, res.Path)
+					delete(c.watchers, wpt)
 				}
 			}
 			c.watchersLock.Unlock()
@@ -554,23 +539,8 @@ func (c *Conn) addWatcher(path string, watcherType watcherType) <-chan Event {
 	defer c.watchersLock.Unlock()
 
 	ch := make(chan Event, 1)
-	wat := c.watchers[path]
-	if wat == nil {
-		wat = &watchers{
-			dataWatchers:  make([]chan Event, 0),
-			existWatchers: make([]chan Event, 0),
-			childWatchers: make([]chan Event, 0),
-		}
-		c.watchers[path] = wat
-	}
-	switch watcherType {
-	case watcherTypeChild:
-		wat.childWatchers = append(wat.childWatchers, ch)
-	case watcherTypeData:
-		wat.dataWatchers = append(wat.dataWatchers, ch)
-	case watcherTypeExist:
-		wat.existWatchers = append(wat.existWatchers, ch)
-	}
+	wpt := watchPathType{path, watcherType}
+	c.watchers[wpt] = append(c.watchers[wpt], ch)
 	return ch
 }
 
