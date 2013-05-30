@@ -18,7 +18,7 @@ import (
 
 const (
 	bufferSize      = 1536 * 1024
-	eventChanSize   = 5
+	eventChanSize   = 6
 	sendChanSize    = 16
 	protectedPrefix = "_c_"
 )
@@ -48,10 +48,10 @@ type watchers struct {
 }
 
 type Conn struct {
+	state          State
 	servers        []string
 	serverIndex    int
 	conn           net.Conn
-	state          State
 	eventChan      chan Event
 	shouldQuit     chan bool
 	pingInterval   time.Duration
@@ -128,15 +128,27 @@ func (c *Conn) Close() {
 	c.disconnect()
 }
 
+func (c *Conn) State() State {
+	return State(atomic.LoadInt32((*int32)(&c.state)))
+}
+
+func (c *Conn) setState(state State) {
+	atomic.StoreInt32((*int32)(&c.state), int32(state))
+	select {
+	case c.eventChan <- Event{Type: EventSession, State: state}:
+	default:
+		// panic("zk: event channel full - it must be monitored and never allowed to be full")
+	}
+}
+
 func (c *Conn) connect() {
 	startIndex := c.serverIndex
-	c.state = StateConnecting
+	c.setState(StateConnecting)
 	for {
 		zkConn, err := net.DialTimeout("tcp", c.servers[c.serverIndex], c.connectTimeout)
 		if err == nil {
 			c.conn = zkConn
-			c.state = StateConnected
-			c.eventChan <- Event{EventSession, c.state, "", nil}
+			c.setState(StateConnected)
 			return
 		}
 
@@ -182,8 +194,7 @@ func (c *Conn) loop() {
 			<-recvDone
 		}
 
-		c.state = StateDisconnected
-		c.eventChan <- Event{EventSession, c.state, "", nil}
+		c.setState(StateDisconnected)
 
 		// Yeesh
 		if !strings.Contains(err.Error(), "use of closed network connection") {
@@ -228,7 +239,7 @@ func (c *Conn) invalidateWatches(err error) {
 
 	if len(c.watchers) >= 0 {
 		for path, wat := range c.watchers {
-			ev := Event{EventSession, c.state, path, err}
+			ev := Event{Type: EventNotWatching, State: StateDisconnected, Path: path, Err: err}
 			for _, ch := range wat.dataWatchers {
 				ch <- ev
 			}
@@ -336,8 +347,7 @@ func (c *Conn) authenticate() error {
 	if r.SessionId == 0 {
 		c.sessionId = 0
 		c.passwd = emptyPassword
-		c.state = StateExpired
-		c.eventChan <- Event{EventSession, c.state, "", nil}
+		c.setState(StateExpired)
 		return ErrSessionExpired
 	}
 
@@ -347,8 +357,7 @@ func (c *Conn) authenticate() error {
 	c.timeout = r.TimeOut
 	c.sessionId = r.SessionId
 	c.passwd = r.Passwd
-	c.state = StateHasSession
-	c.eventChan <- Event{EventSession, c.state, "", nil}
+	c.setState(StateHasSession)
 
 	return nil
 }
