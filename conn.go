@@ -176,26 +176,30 @@ func (c *Conn) loop() {
 		if err == ErrSessionExpired {
 			c.invalidateWatches(err)
 		} else if err == nil {
-			closeChan := make(chan bool)
-			sendDone := make(chan bool, 1)
+			closeChan := make(chan bool) // channel to tell send loop stop
+
+			sendDone := make(chan bool, 1) // channel signalling that send loop is done
 			go func() {
 				c.sendLoop(c.conn, closeChan)
-				c.conn.Close()
-				close(sendDone)
+				c.conn.Close()  // causes recv loop to EOF/exif
+				close(sendDone) // tell recv loop we're done
 			}()
 
-			recvDone := make(chan bool, 1)
+			recvDone := make(chan bool, 1) // channel signalling that recv loop is done
 			go func() {
 				err = c.recvLoop(c.conn)
 				if err == nil {
 					panic("zk: recvLoop should never return nil error")
 				}
-				close(closeChan)
-				<-sendDone // wait for send loop to exit
-				close(recvDone)
+				close(closeChan) // tell send loop to exit
+				<-sendDone       // wait for send loop to exit
+				close(recvDone)  // allow main loop to continue
 			}()
 
-			<-recvDone
+			<-recvDone // wait for recv loop to finish which waits for the send loop
+
+			// At this point both send and receive loops have stopped, and the
+			// socket should be closed.
 		}
 
 		c.setState(StateDisconnected)
