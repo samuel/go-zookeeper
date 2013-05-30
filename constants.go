@@ -149,7 +149,7 @@ const (
 	errSystemError          = -1
 	errRuntimeInconsistency = -2
 	errDataInconsistency    = -3
-	errConncetionLoss       = -4
+	errConnectionLoss       = -4
 	errMarshallingError     = -5
 	errUnimplemented        = -6
 	errOperationTimeout     = -7

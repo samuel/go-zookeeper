@@ -27,17 +27,17 @@ const (
 	protectedPrefix = "_c_"
 )
 
-type watcherType int
+type watchType int
 
-var (
-	watcherTypeData  = watcherType(1)
-	watcherTypeExist = watcherType(2)
-	watcherTypeChild = watcherType(3)
+const (
+	watchTypeData  = iota
+	watchTypeExist = iota
+	watchTypeChild = iota
 )
 
 type watchPathType struct {
 	path  string
-	wType watcherType
+	wType watchType
 }
 
 type Conn struct {
@@ -212,6 +212,13 @@ func (c *Conn) loop() {
 			log.Println(err)
 		}
 
+		select {
+		case <-c.shouldQuit:
+			c.flushRequests(ErrClosing)
+			return
+		default:
+		}
+
 		if err != ErrSessionExpired {
 			err = ErrConnectionClosed
 		}
@@ -222,12 +229,6 @@ func (c *Conn) loop() {
 			case <-c.shouldQuit:
 				return
 			case <-time.After(c.reconnectDelay):
-			}
-		} else {
-			select {
-			case <-c.shouldQuit:
-				return
-			default:
 			}
 		}
 	}
@@ -279,11 +280,11 @@ func (c *Conn) sendSetWatches() {
 			continue
 		}
 		switch pathType.wType {
-		case watcherTypeData:
+		case watchTypeData:
 			req.DataWatches = append(req.DataWatches, pathType.path)
-		case watcherTypeExist:
+		case watchTypeExist:
 			req.ExistWatches = append(req.ExistWatches, pathType.path)
-		case watcherTypeChild:
+		case watchTypeChild:
 			req.ChildWatches = append(req.ChildWatches, pathType.path)
 		}
 		n++
@@ -455,8 +456,6 @@ func (c *Conn) recvLoop(conn net.Conn) error {
 			return err
 		}
 
-		// log.Printf("Response xid=%d zxid=%d err=%d\n", res.Xid, res.Zxid, res.Err)
-
 		if res.Xid == -1 {
 			res := &watcherEvent{}
 			_, err := decodePacket(buf[16:16+blen], res)
@@ -473,14 +472,14 @@ func (c *Conn) recvLoop(conn net.Conn) error {
 			case c.eventChan <- ev:
 			default:
 			}
-			wTypes := make([]watcherType, 0, 2)
+			wTypes := make([]watchType, 0, 2)
 			switch res.Type {
 			case EventNodeCreated:
-				wTypes = append(wTypes, watcherTypeExist)
+				wTypes = append(wTypes, watchTypeExist)
 			case EventNodeDeleted, EventNodeDataChanged:
-				wTypes = append(wTypes, watcherTypeExist, watcherTypeData)
+				wTypes = append(wTypes, watchTypeExist, watchTypeData)
 			case EventNodeChildrenChanged:
-				wTypes = append(wTypes, watcherTypeChild)
+				wTypes = append(wTypes, watchTypeChild)
 			}
 			c.watchersLock.Lock()
 			for _, t := range wTypes {
@@ -534,12 +533,12 @@ func (c *Conn) nextXid() int32 {
 	return atomic.AddInt32(&c.xid, 1)
 }
 
-func (c *Conn) addWatcher(path string, watcherType watcherType) <-chan Event {
+func (c *Conn) addWatcher(path string, watchType watchType) <-chan Event {
 	c.watchersLock.Lock()
 	defer c.watchersLock.Unlock()
 
 	ch := make(chan Event, 1)
-	wpt := watchPathType{path, watcherType}
+	wpt := watchPathType{path, watchType}
 	c.watchers[wpt] = append(c.watchers[wpt], ch)
 	return ch
 }
@@ -578,7 +577,7 @@ func (c *Conn) ChildrenW(path string) ([]string, *Stat, <-chan Event, error) {
 	res := &getChildren2Response{}
 	_, err := c.request(opGetChildren2, &getChildren2Request{Path: path, Watch: true}, res, func(req *request, res *responseHeader, err error) {
 		if err == nil {
-			ech = c.addWatcher(path, watcherTypeChild)
+			ech = c.addWatcher(path, watchTypeChild)
 		}
 	})
 	if err != nil {
@@ -598,7 +597,7 @@ func (c *Conn) GetW(path string) ([]byte, *Stat, <-chan Event, error) {
 	res := &getDataResponse{}
 	_, err := c.request(opGetData, &getDataRequest{Path: path, Watch: true}, res, func(req *request, res *responseHeader, err error) {
 		if err == nil {
-			ech = c.addWatcher(path, watcherTypeData)
+			ech = c.addWatcher(path, watchTypeData)
 		}
 	})
 	if err != nil {
@@ -684,9 +683,9 @@ func (c *Conn) ExistsW(path string) (bool, *Stat, <-chan Event, error) {
 	res := &existsResponse{}
 	_, err := c.request(opExists, &existsRequest{Path: path, Watch: true}, res, func(req *request, res *responseHeader, err error) {
 		if err == nil {
-			ech = c.addWatcher(path, watcherTypeData)
+			ech = c.addWatcher(path, watchTypeData)
 		} else if err == ErrNoNode {
-			ech = c.addWatcher(path, watcherTypeExist)
+			ech = c.addWatcher(path, watchTypeExist)
 		}
 	})
 	exists := true
