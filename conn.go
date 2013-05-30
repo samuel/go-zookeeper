@@ -3,7 +3,9 @@ package zk
 // TODO: make sure a ping response comes back in a reasonable time
 
 import (
+	"crypto/rand"
 	"encoding/binary"
+	"fmt"
 	"io"
 	"log"
 	"net"
@@ -15,9 +17,10 @@ import (
 )
 
 const (
-	bufferSize    = 1536 * 1024
-	eventChanSize = 5
-	sendChanSize  = 16
+	bufferSize      = 1536 * 1024
+	eventChanSize   = 5
+	sendChanSize    = 16
+	protectedPrefix = "_c_"
 )
 
 type watcherType int
@@ -187,7 +190,11 @@ func (c *Conn) loop() {
 			log.Println(err)
 		}
 
-		c.flushRequests(err)
+		if err == ErrSessionExpired {
+			c.flushRequests(err)
+		} else {
+			c.flushRequests(ErrConnectionClosed)
+		}
 
 		if c.reconnectDelay > 0 {
 			select {
@@ -377,13 +384,6 @@ func (c *Conn) sendLoop(conn net.Conn, closeChan <-chan bool) error {
 
 			binary.BigEndian.PutUint32(buf[:4], uint32(n))
 
-			_, err = conn.Write(buf[:n+4])
-			if err != nil {
-				req.recvChan <- err
-				conn.Close()
-				return err
-			}
-
 			c.requestsLock.Lock()
 			select {
 			case <-closeChan:
@@ -394,6 +394,13 @@ func (c *Conn) sendLoop(conn net.Conn, closeChan <-chan bool) error {
 			}
 			c.requests[req.xid] = req
 			c.requestsLock.Unlock()
+
+			_, err = conn.Write(buf[:n+4])
+			if err != nil {
+				req.recvChan <- err
+				conn.Close()
+				return err
+			}
 		case <-pingTicker.C:
 			n, err := encodePacket(buf[4:], &requestHeader{Xid: -2, Opcode: opPing})
 			if err != nil {
@@ -594,6 +601,48 @@ func (c *Conn) Create(path string, data []byte, flags int32, acl []ACL) (string,
 	res := &createResponse{}
 	err := c.request(opCreate, &createRequest{path, data, acl, flags}, res)
 	return res.Path, err
+}
+
+// Fixes a hole if the server crashes after it creates the node
+func (c *Conn) CreateProtectedEphemeralSequential(path string, data []byte, acl []ACL) (string, error) {
+	var guid [16]byte
+	_, err := io.ReadFull(rand.Reader, guid[:16])
+	if err != nil {
+		return "", err
+	}
+	guidStr := fmt.Sprintf("%x", guid)
+
+	parts := strings.Split(path, "/")
+	parts[len(parts)-1] = fmt.Sprintf("%s%s-%s", protectedPrefix, guidStr, parts[len(parts)-1])
+	rootPath := strings.Join(parts[:len(parts)-1], "/")
+	protectedPath := strings.Join(parts, "/")
+
+	res := &createResponse{}
+	for i := 0; i < 3; i++ {
+		err = c.request(opCreate, &createRequest{protectedPath, data, acl, FlagEphemeral | FlagSequence}, res)
+		switch err {
+		case ErrSessionExpired:
+			// No need to search for the node since it can't exist. Just try again.
+		case ErrConnectionClosed:
+			children, _, err := c.Children(rootPath)
+			if err != nil {
+				return "", err
+			}
+			for _, p := range children {
+				parts := strings.Split(p, "/")
+				if pth := parts[len(parts)-1]; strings.HasPrefix(pth, protectedPrefix) {
+					if g := pth[len(protectedPrefix) : len(protectedPrefix)+32]; g == guidStr {
+						return rootPath + "/" + p, nil
+					}
+				}
+			}
+		case nil:
+			return res.Path, nil
+		default:
+			return "", err
+		}
+	}
+	return "", err
 }
 
 func (c *Conn) Delete(path string, version int32) error {

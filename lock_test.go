@@ -12,7 +12,9 @@ func TestLock(t *testing.T) {
 	}
 	defer zk.Close()
 
-	l := NewLock(zk, "test")
+	acls := WorldACL(PermAll)
+
+	l := NewLock(zk, "/test", acls)
 	if err := l.Lock(); err != nil {
 		t.Fatal(err)
 	}
@@ -26,7 +28,7 @@ func TestLock(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	l2 := NewLock(zk, "test")
+	l2 := NewLock(zk, "/test", acls)
 	go func() {
 		if err := l2.Lock(); err != nil {
 			t.Fatal(err)

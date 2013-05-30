@@ -1,10 +1,8 @@
 package zk
 
 import (
-	"crypto/rand"
 	"errors"
 	"fmt"
-	"io"
 	"strconv"
 	"strings"
 )
@@ -15,18 +13,18 @@ var (
 )
 
 type Lock struct {
-	c    *Conn
-	name string
-	path string
-	seq  int
-	guid [16]byte
+	c        *Conn
+	path     string
+	acl      []ACL
+	lockPath string
+	seq      int
 }
 
-func NewLock(c *Conn, name string) *Lock {
+func NewLock(c *Conn, path string, acl []ACL) *Lock {
 	return &Lock{
 		c:    c,
-		name: name,
-		path: "",
+		path: path,
+		acl:  acl,
 	}
 }
 
@@ -36,22 +34,36 @@ func parseSeq(path string) (int, error) {
 }
 
 func (l *Lock) Lock() error {
-	if l.path != "" {
+	if l.lockPath != "" {
 		return ErrDeadlock
 	}
 
-	_, err := io.ReadFull(rand.Reader, l.guid[:16])
-	if err != nil {
-		return err
-	}
+	prefix := fmt.Sprintf("%s/lock-", l.path)
 
-	basePath := fmt.Sprintf("/locks/%s", l.name)
-	prefix := fmt.Sprintf("%s/%x-", basePath, l.guid)
-	path, err := l.c.Create(prefix, []byte("lock"), FlagEphemeral|FlagSequence, WorldACL(PermAll))
+	path := ""
+	var err error
+	for i := 0; i < 3; i++ {
+		path, err = l.c.CreateProtectedEphemeralSequential(prefix, []byte{}, l.acl)
+		if err == ErrNoNode {
+			// Create parent node.
+			parts := strings.Split(l.path, "/")
+			pth := ""
+			for _, p := range parts[1:] {
+				pth += "/" + p
+				_, err := l.c.Create(pth, []byte{}, 0, l.acl)
+				if err != nil {
+					return err
+				}
+			}
+		} else if err == nil {
+			break
+		} else {
+			return err
+		}
+	}
 	if err != nil {
 		return err
 	}
-	// TODO: handle recoverable errors
 
 	seq, err := parseSeq(path)
 	if err != nil {
@@ -59,7 +71,7 @@ func (l *Lock) Lock() error {
 	}
 
 	for {
-		children, _, err := l.c.Children(basePath)
+		children, _, err := l.c.Children(l.path)
 		if err != nil {
 			return err
 		}
@@ -86,7 +98,7 @@ func (l *Lock) Lock() error {
 			break
 		}
 
-		exists, _, ch, err := l.c.ExistsW(prevSeqPath)
+		exists, _, ch, err := l.c.ExistsW(l.path + "/" + prevSeqPath)
 		if err != nil {
 			return err
 		}
@@ -100,18 +112,18 @@ func (l *Lock) Lock() error {
 	}
 
 	l.seq = seq
-	l.path = path
+	l.lockPath = path
 	return nil
 }
 
 func (l *Lock) Unlock() error {
-	if l.path == "" {
+	if l.lockPath == "" {
 		return ErrNotLocked
 	}
-	if err := l.c.Delete(l.path, -1); err != nil {
+	if err := l.c.Delete(l.lockPath, -1); err != nil {
 		return err
 	}
-	l.path = ""
+	l.lockPath = ""
 	l.seq = 0
 	return nil
 }
