@@ -568,6 +568,10 @@ func (c *Conn) request(opcode int32, req interface{}, res interface{}) error {
 	return <-c.queueRequest(opcode, req, res)
 }
 
+func (c *Conn) AddAuth(scheme string, auth []byte) error {
+	return c.request(opSetAuth, &setAuthRequest{Type: 0, Scheme: scheme, Auth: auth}, &setAuthResponse{})
+}
+
 func (c *Conn) Children(path string) ([]string, *Stat, error) {
 	res := &getChildren2Response{}
 	err := c.request(opGetChildren2, &getChildren2Request{Path: path, Watch: false}, res)
@@ -592,7 +596,7 @@ func (c *Conn) Get(path string) ([]byte, *Stat, error) {
 
 func (c *Conn) GetW(path string) ([]byte, *Stat, <-chan Event, error) {
 	res := &getDataResponse{}
-	err := c.request(opExists, &getDataRequest{Path: path, Watch: true}, res)
+	err := c.request(opGetData, &getDataRequest{Path: path, Watch: true}, res)
 	var ech chan Event
 	if err == nil {
 		ech = c.addWatcher(path, watcherTypeData)
@@ -659,6 +663,17 @@ func (c *Conn) Delete(path string, version int32) error {
 	return c.request(opDelete, &deleteRequest{path, version}, res)
 }
 
+func (c *Conn) Exists(path string) (bool, *Stat, error) {
+	res := &existsResponse{}
+	err := c.request(opExists, &existsRequest{Path: path, Watch: false}, res)
+	exists := true
+	if err == ErrNoNode {
+		exists = false
+		err = nil
+	}
+	return exists, &res.Stat, err
+}
+
 func (c *Conn) ExistsW(path string) (bool, *Stat, <-chan Event, error) {
 	res := &existsResponse{}
 	err := c.request(opExists, &existsRequest{Path: path, Watch: true}, res)
@@ -676,4 +691,16 @@ func (c *Conn) ExistsW(path string) (bool, *Stat, <-chan Event, error) {
 		}
 	}
 	return exists, &res.Stat, ech, err
+}
+
+func (c *Conn) GetACL(path string) ([]ACL, *Stat, error) {
+	res := &getAclResponse{}
+	err := c.request(opGetAcl, &getAclRequest{Path: path}, res)
+	return res.Acl, &res.Stat, err
+}
+
+func (c *Conn) SetACL(path string, acl []ACL, version int32) (*Stat, error) {
+	res := &setAclResponse{}
+	err := c.request(opSetAcl, &setAclRequest{Path: path, Acl: acl, Version: version}, res)
+	return &res.Stat, err
 }

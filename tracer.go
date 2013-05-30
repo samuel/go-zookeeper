@@ -75,6 +75,8 @@ func trace(conn1, conn2 net.Conn, client bool) {
 					cr = &setWatchesRequest{}
 				case opSync:
 					cr = &syncRequest{}
+				case opSetAuth:
+					cr = &setAuthRequest{}
 				}
 			}
 		} else {
@@ -129,6 +131,8 @@ func trace(conn1, conn2 net.Conn, client bool) {
 					cr = &syncResponse{}
 				case opWatcherEvent:
 					cr = &watcherEvent{}
+				case opSetAuth:
+					cr = &setAuthResponse{}
 				}
 				if errnum != 0 {
 					cr = &struct{}{}

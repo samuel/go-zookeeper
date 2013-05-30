@@ -29,6 +29,100 @@ func TestCreate(t *testing.T) {
 	}
 }
 
+func TestGetSetACL(t *testing.T) {
+	zk, _, err := Connect([]string{"127.0.0.1:2182"}, time.Second*15)
+	if err != nil {
+		t.Fatalf("Connect returned error: %+v", err)
+	}
+	defer zk.Close()
+
+	if err := zk.AddAuth("digest", []byte("blah")); err != nil {
+		t.Fatalf("AddAuth returned error %+v", err)
+	}
+
+	path := "/gozk-test"
+
+	if err := zk.Delete(path, -1); err != nil && err != ErrNoNode {
+		t.Fatalf("Delete returned error: %+v", err)
+	}
+	if path, err := zk.Create(path, []byte{1, 2, 3, 4}, 0, WorldACL(PermAll)); err != nil {
+		t.Fatalf("Create returned error: %+v", err)
+	} else if path != "/gozk-test" {
+		t.Fatalf("Create returned different path '%s' != '/gozk-test'", path)
+	}
+
+	expected := WorldACL(PermAll)
+
+	if acl, stat, err := zk.GetACL(path); err != nil {
+		t.Fatalf("GetACL returned error %+v", err)
+	} else if stat == nil {
+		t.Fatalf("GetACL returned nil Stat")
+	} else if len(acl) != 1 || expected[0] != acl[0] {
+		t.Fatalf("GetACL mismatch expected %+v instead of %+v", expected, acl)
+	}
+
+	expected = []ACL{{PermAll, "ip", "127.0.0.1"}}
+
+	if stat, err := zk.SetACL(path, expected, -1); err != nil {
+		t.Fatalf("SetACL returned error %+v", err)
+	} else if stat == nil {
+		t.Fatalf("SetACL returned nil Stat")
+	}
+
+	if acl, stat, err := zk.GetACL(path); err != nil {
+		t.Fatalf("GetACL returned error %+v", err)
+	} else if stat == nil {
+		t.Fatalf("GetACL returned nil Stat")
+	} else if len(acl) != 1 || expected[0] != acl[0] {
+		t.Fatalf("GetACL mismatch expected %+v instead of %+v", expected, acl)
+	}
+}
+
+func TestAuth(t *testing.T) {
+	zk, _, err := Connect([]string{"127.0.0.1:2182"}, time.Second*15)
+	if err != nil {
+		t.Fatalf("Connect returned error: %+v", err)
+	}
+	defer zk.Close()
+
+	path := "/gozk-digest-test"
+	if err := zk.Delete(path, -1); err != nil && err != ErrNoNode {
+		t.Fatalf("Delete returned error: %+v", err)
+	}
+
+	acl := DigestACL(PermAll, "user", "password")
+
+	if p, err := zk.Create(path, []byte{1, 2, 3, 4}, 0, acl); err != nil {
+		t.Fatalf("Create returned error: %+v", err)
+	} else if p != path {
+		t.Fatalf("Create returned different path '%s' != '%s'", p, path)
+	}
+
+	if a, stat, err := zk.GetACL(path); err != nil {
+		t.Fatalf("GetACL returned error %+v", err)
+	} else if stat == nil {
+		t.Fatalf("GetACL returned nil Stat")
+	} else if len(a) != 1 || acl[0] != a[0] {
+		t.Fatalf("GetACL mismatch expected %+v instead of %+v", acl, a)
+	}
+
+	if _, _, err := zk.Get(path); err != ErrNoAuth {
+		t.Fatalf("Get returned error %+v instead of ErrNoAuth", err)
+	}
+
+	if err := zk.AddAuth("digest", []byte("user:password")); err != nil {
+		t.Fatalf("AddAuth returned error %+v", err)
+	}
+
+	if data, stat, err := zk.Get(path); err != nil {
+		t.Fatalf("Get returned error %+v", err)
+	} else if stat == nil {
+		t.Fatalf("Get returned nil Stat")
+	} else if len(data) != 4 {
+		t.Fatalf("Get returned wrong data length")
+	}
+}
+
 func TestChildWatch(t *testing.T) {
 	zk, _, err := Connect([]string{"127.0.0.1:2182"}, time.Second*15)
 	if err != nil {

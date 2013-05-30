@@ -199,6 +199,9 @@ type setWatchesResponse struct{}
 type syncRequest pathRequest
 type syncResponse pathResponse
 
+type setAuthRequest auth
+type setAuthResponse struct{}
+
 type watcherEvent struct {
 	Type  EventType
 	State State
