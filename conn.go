@@ -181,7 +181,7 @@ func (c *Conn) loop() {
 			sendDone := make(chan bool, 1) // channel signalling that send loop is done
 			go func() {
 				c.sendLoop(c.conn, closeChan)
-				c.conn.Close()  // causes recv loop to EOF/exif
+				c.conn.Close()  // causes recv loop to EOF/exit
 				close(sendDone) // tell recv loop we're done
 			}()
 
