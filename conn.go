@@ -107,8 +107,8 @@ func Connect(servers []string, recvTimeout time.Duration) (*Conn, <-chan Event, 
 	}
 	go func() {
 		conn.loop()
-		conn.flushRequests(ErrSessionExpired)
-		conn.invalidateWatches(ErrSessionExpired)
+		conn.flushRequests(ErrClosing)
+		conn.invalidateWatches(ErrClosing)
 	}()
 	return &conn, ec, nil
 }
