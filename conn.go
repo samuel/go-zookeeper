@@ -43,7 +43,7 @@ type watchers struct {
 }
 
 type Conn struct {
-	lastZxid  int64 // must be 64-bit aligned
+	lastZxid  int64
 	sessionId int64
 	state     State // must be 32-bit aligned
 	xid       int32
@@ -143,14 +143,6 @@ func (c *Conn) setState(state State) {
 	default:
 		// panic("zk: event channel full - it must be monitored and never allowed to be full")
 	}
-}
-
-func (c *Conn) zxid() int64 {
-	return atomic.LoadInt64(&c.lastZxid)
-}
-
-func (c *Conn) setZxid(zxid int64) {
-	atomic.StoreInt64(&c.lastZxid, zxid)
 }
 
 func (c *Conn) connect() {
@@ -275,7 +267,7 @@ func (c *Conn) sendSetWatches() {
 	}
 
 	req := &setWatchesRequest{
-		RelativeZxid: c.zxid(),
+		RelativeZxid: c.lastZxid,
 		DataWatches:  make([]string, 0),
 		ExistWatches: make([]string, 0),
 		ChildWatches: make([]string, 0),
@@ -315,7 +307,7 @@ func (c *Conn) authenticate() error {
 
 	n, err := encodePacket(buf[4:], &connectRequest{
 		ProtocolVersion: protocolVersion,
-		LastZxidSeen:    c.zxid(),
+		LastZxidSeen:    c.lastZxid,
 		TimeOut:         c.timeout,
 		SessionId:       c.sessionId,
 		Passwd:          c.passwd,
@@ -496,7 +488,7 @@ func (c *Conn) recvLoop(conn net.Conn) error {
 			}
 			c.watchersLock.Lock()
 			if wat := c.watchers[res.Path]; wat != nil {
-				zxid := c.zxid()
+				zxid := c.lastZxid
 				switch res.Type {
 				case EventNodeCreated:
 					wat.existWatchers = signalWatchers(wat.existWatchers, zxid, ev)
@@ -517,7 +509,7 @@ func (c *Conn) recvLoop(conn net.Conn) error {
 			log.Printf("Xid < 0 (%d) but not ping or watcher event", res.Xid)
 		} else {
 			if res.Zxid > 0 {
-				c.setZxid(res.Zxid)
+				c.lastZxid = res.Zxid
 			}
 
 			c.requestsLock.Lock()
