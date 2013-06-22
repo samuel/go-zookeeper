@@ -13,6 +13,8 @@ func TestEncodeDecodePacket(t *testing.T) {
 	encodeDecodeTest(t, &getChildrenResponse{[]string{"foo", "bar"}})
 	encodeDecodeTest(t, &pathWatchRequest{"path", true})
 	encodeDecodeTest(t, &pathWatchRequest{"path", false})
+	encodeDecodeTest(t, &CheckVersionRequest{"/", -1})
+	encodeDecodeTest(t, &multiRequest{Ops: []multiRequestOp{{multiHeader{opCheck, false, -1}, &CheckVersionRequest{"/", -1}}}})
 }
 
 func encodeDecodeTest(t *testing.T, r interface{}) {
@@ -22,8 +24,9 @@ func encodeDecodeTest(t *testing.T, r interface{}) {
 		t.Errorf("encodePacket returned non-nil error %+v\n", err)
 		return
 	}
+	t.Logf("%+v %x", r, buf[:n])
 	r2 := reflect.New(reflect.ValueOf(r).Elem().Type()).Interface()
-	n2, err := decodePacket(buf, r2)
+	n2, err := decodePacket(buf[:n], r2)
 	if err != nil {
 		t.Errorf("decodePacket returned non-nil error %+v\n", err)
 		return

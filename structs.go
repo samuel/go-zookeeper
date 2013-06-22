@@ -20,17 +20,17 @@ type ACL struct {
 }
 
 type Stat struct {
-	Czxid          int64
-	Mzxid          int64
-	Ctime          int64
-	Mtime          int64
-	Version        int32
-	Cversion       int32
-	Aversion       int32
-	EphemeralOwner int64
-	DataLength     int32
-	NumChildren    int32
-	Pzxid          int64
+	Czxid          int64 // The zxid of the change that caused this znode to be created.
+	Mzxid          int64 // The zxid of the change that last modified this znode.
+	Ctime          int64 // The time in milliseconds from epoch when this znode was created.
+	Mtime          int64 // The time in milliseconds from epoch when this znode was last modified.
+	Version        int32 // The number of changes to the data of this znode.
+	Cversion       int32 // The number of changes to the children of this znode.
+	Aversion       int32 // The number of changes to the ACL of this znode.
+	EphemeralOwner int64 // The session id of the owner of this znode if the znode is an ephemeral node. If it is not an ephemeral node, it will be zero.
+	DataLength     int32 // The length of the data field of this znode.
+	NumChildren    int32 // The number of children of this znode.
+	Pzxid          int64 // last modified children
 }
 
 type requestHeader struct {
@@ -62,7 +62,7 @@ type pathRequest struct {
 	Path string
 }
 
-type pathVersionRequest struct {
+type PathVersionRequest struct {
 	Path    string
 	Version int32
 }
@@ -82,7 +82,7 @@ type statResponse struct {
 
 //
 
-type checkVersionRequest pathVersionRequest
+type CheckVersionRequest PathVersionRequest
 type closeRequest struct{}
 type closeResponse struct{}
 
@@ -101,7 +101,7 @@ type connectResponse struct {
 	Passwd          []byte
 }
 
-type createRequest struct {
+type CreateRequest struct {
 	Path  string
 	Data  []byte
 	Acl   []ACL
@@ -109,7 +109,7 @@ type createRequest struct {
 }
 
 type createResponse pathResponse
-type deleteRequest pathVersionRequest
+type DeleteRequest PathVersionRequest
 type deleteResponse struct{}
 
 type errorResponse struct {
@@ -166,7 +166,7 @@ type setAclRequest struct {
 
 type setAclResponse statResponse
 
-type setDataRequest struct {
+type SetDataRequest struct {
 	Path    string
 	Data    []byte
 	Version int32
@@ -188,7 +188,7 @@ type setSaslResponse struct {
 }
 
 type setWatchesRequest struct {
-	RealtiveZxid int64
+	RelativeZxid int64
 	DataWatches  []string
 	ExistWatches []string
 	ChildWatches []string
@@ -199,10 +199,129 @@ type setWatchesResponse struct{}
 type syncRequest pathRequest
 type syncResponse pathResponse
 
+type setAuthRequest auth
+type setAuthResponse struct{}
+
+type multiRequestOp struct {
+	Header multiHeader
+	Op     interface{}
+}
+type multiRequest struct {
+	Ops        []multiRequestOp
+	DoneHeader multiHeader
+}
+type multiResponseOp struct {
+	Header multiHeader
+	String string
+	Stat   *Stat
+}
+type multiResponse struct {
+	Ops        []multiResponseOp
+	DoneHeader multiHeader
+}
+
+func (r *multiRequest) Encode(buf []byte) (int, error) {
+	total := 0
+	for _, op := range r.Ops {
+		op.Header.Done = false
+		if n, err := encodePacketValue(buf[total:], reflect.ValueOf(op)); err != nil {
+			return total, err
+		} else {
+			total += n
+		}
+	}
+	r.DoneHeader.Done = true
+	if n, err := encodePacketValue(buf[total:], reflect.ValueOf(r.DoneHeader)); err != nil {
+		return total, err
+	} else {
+		total += n
+	}
+
+	return total, nil
+}
+
+func (r *multiRequest) Decode(buf []byte) (int, error) {
+	r.Ops = make([]multiRequestOp, 0)
+	r.DoneHeader = multiHeader{-1, true, -1}
+	total := 0
+	for {
+		header := &multiHeader{}
+		if n, err := decodePacketValue(buf[total:], reflect.ValueOf(header)); err != nil {
+			return total, err
+		} else {
+			total += n
+		}
+		if header.Done {
+			r.DoneHeader = *header
+			break
+		}
+
+		req := requestStructForOp(header.Type)
+		if req == nil {
+			return total, ErrApiError
+		}
+		if n, err := decodePacketValue(buf[total:], reflect.ValueOf(req)); err != nil {
+			return total, err
+		} else {
+			total += n
+		}
+		r.Ops = append(r.Ops, multiRequestOp{*header, req})
+	}
+	return total, nil
+}
+
+func (r *multiResponse) Decode(buf []byte) (int, error) {
+	r.Ops = make([]multiResponseOp, 0)
+	r.DoneHeader = multiHeader{-1, true, -1}
+	total := 0
+	for {
+		header := &multiHeader{}
+		if n, err := decodePacketValue(buf[total:], reflect.ValueOf(header)); err != nil {
+			return total, err
+		} else {
+			total += n
+		}
+		if header.Done {
+			r.DoneHeader = *header
+			break
+		}
+
+		res := multiResponseOp{Header: *header}
+		var w reflect.Value
+		switch header.Type {
+		default:
+			return total, ErrApiError
+		case opCreate:
+			w = reflect.ValueOf(&res.String)
+		case opSetData:
+			res.Stat = new(Stat)
+			w = reflect.ValueOf(res.Stat)
+		case opCheck, opDelete:
+		}
+		if w.IsValid() {
+			if n, err := decodePacketValue(buf[total:], w); err != nil {
+				return total, err
+			} else {
+				total += n
+			}
+		}
+		r.Ops = append(r.Ops, res)
+	}
+	return total, nil
+}
+
 type watcherEvent struct {
 	Type  EventType
 	State State
 	Path  string
+}
+
+type decoder interface {
+	Decode(buf []byte) (int, error)
+}
+
+type encoder interface {
+	Encode(buf []byte) (int, error)
 }
 
 func decodePacket(buf []byte, st interface{}) (n int, err error) {
@@ -220,21 +339,37 @@ func decodePacket(buf []byte, st interface{}) (n int, err error) {
 	if v.Kind() != reflect.Ptr || v.IsNil() {
 		return 0, ErrPtrExpected
 	}
-	return decodePacketValue(buf, v.Elem())
+	return decodePacketValue(buf, v)
 }
 
 func decodePacketValue(buf []byte, v reflect.Value) (int, error) {
+	rv := v
+	kind := v.Kind()
+	if kind == reflect.Ptr {
+		if v.IsNil() {
+			v.Set(reflect.New(v.Type().Elem()))
+		}
+		v = v.Elem()
+		kind = v.Kind()
+	}
+
 	n := 0
-	switch v.Kind() {
+	switch kind {
 	default:
 		return n, ErrUnhandledFieldType
 	case reflect.Struct:
-		for i := 0; i < v.NumField(); i++ {
-			field := v.Field(i)
-			n2, err := decodePacketValue(buf[n:], field)
-			n += n2
-			if err != nil {
-				return n, err
+		if de, ok := rv.Interface().(decoder); ok {
+			return de.Decode(buf)
+		} else if de, ok := v.Interface().(decoder); ok {
+			return de.Decode(buf)
+		} else {
+			for i := 0; i < v.NumField(); i++ {
+				field := v.Field(i)
+				n2, err := decodePacketValue(buf[n:], field)
+				n += n2
+				if err != nil {
+					return n, err
+				}
 			}
 		}
 	case reflect.Bool:
@@ -265,7 +400,7 @@ func decodePacketValue(buf []byte, v reflect.Value) (int, error) {
 				}
 			}
 		case reflect.Uint8:
-			ln := int(binary.BigEndian.Uint32(buf[n : n+4]))
+			ln := int(int32(binary.BigEndian.Uint32(buf[n : n+4])))
 			if ln < 0 {
 				n += 4
 				v.SetBytes(nil)
@@ -295,21 +430,32 @@ func encodePacket(buf []byte, st interface{}) (n int, err error) {
 	if v.Kind() != reflect.Ptr || v.IsNil() {
 		return 0, ErrPtrExpected
 	}
-	return encodePacketValue(buf, v.Elem())
+	return encodePacketValue(buf, v)
 }
 
 func encodePacketValue(buf []byte, v reflect.Value) (int, error) {
+	rv := v
+	for v.Kind() == reflect.Ptr || v.Kind() == reflect.Interface {
+		v = v.Elem()
+	}
+
 	n := 0
 	switch v.Kind() {
 	default:
 		return n, ErrUnhandledFieldType
 	case reflect.Struct:
-		for i := 0; i < v.NumField(); i++ {
-			field := v.Field(i)
-			n2, err := encodePacketValue(buf[n:], field)
-			n += n2
-			if err != nil {
-				return n, err
+		if en, ok := rv.Interface().(encoder); ok {
+			return en.Encode(buf)
+		} else if en, ok := v.Interface().(encoder); ok {
+			return en.Encode(buf)
+		} else {
+			for i := 0; i < v.NumField(); i++ {
+				field := v.Field(i)
+				n2, err := encodePacketValue(buf[n:], field)
+				n += n2
+				if err != nil {
+					return n, err
+				}
 			}
 		}
 	case reflect.Bool:
@@ -357,4 +503,82 @@ func encodePacketValue(buf []byte, v reflect.Value) (int, error) {
 		}
 	}
 	return n, nil
+}
+
+func requestStructForOp(op int32) interface{} {
+	switch op {
+	case opClose:
+		return &closeRequest{}
+	case opCreate:
+		return &CreateRequest{}
+	case opDelete:
+		return &DeleteRequest{}
+	case opExists:
+		return &existsRequest{}
+	case opGetAcl:
+		return &getAclRequest{}
+	case opGetChildren:
+		return &getChildrenRequest{}
+	case opGetChildren2:
+		return &getChildren2Request{}
+	case opGetData:
+		return &getDataRequest{}
+	case opPing:
+		return &pingRequest{}
+	case opSetAcl:
+		return &setAclRequest{}
+	case opSetData:
+		return &SetDataRequest{}
+	case opSetWatches:
+		return &setWatchesRequest{}
+	case opSync:
+		return &syncRequest{}
+	case opSetAuth:
+		return &setAuthRequest{}
+	case opCheck:
+		return &CheckVersionRequest{}
+	case opMulti:
+		return &multiRequest{}
+	}
+	return nil
+}
+
+func responseStructForOp(op int32) interface{} {
+	switch op {
+	case opClose:
+		return &closeResponse{}
+	case opCreate:
+		return &createResponse{}
+	case opDelete:
+		return &deleteResponse{}
+	case opExists:
+		return &existsResponse{}
+	case opGetAcl:
+		return &getAclResponse{}
+	case opGetChildren:
+		return &getChildrenResponse{}
+	case opGetChildren2:
+		return &getChildren2Response{}
+	case opGetData:
+		return &getDataResponse{}
+	case opPing:
+		return &pingResponse{}
+	case opSetAcl:
+		return &setAclResponse{}
+	case opSetData:
+		return &setDataResponse{}
+	case opSetWatches:
+		return &setWatchesResponse{}
+	case opSync:
+		return &syncResponse{}
+	case opWatcherEvent:
+		return &watcherEvent{}
+	case opSetAuth:
+		return &setAuthResponse{}
+	// case opCheck:
+	// 	return &checkVersionResponse{}
+	case opMulti:
+		return &multiResponse{}
+	}
+	return nil
 }

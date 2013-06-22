@@ -46,35 +46,9 @@ func trace(conn1, conn2 net.Conn, client bool) {
 				requestsLock.Lock()
 				requests[xid] = opcode
 				requestsLock.Unlock()
-				switch opcode {
-				default:
+				cr = requestStructForOp(opcode)
+				if cr == nil {
 					fmt.Printf("Unknown opcode %d\n", opcode)
-				case opClose:
-					cr = &closeRequest{}
-				case opCreate:
-					cr = &createRequest{}
-				case opDelete:
-					cr = &deleteRequest{}
-				case opExists:
-					cr = &existsRequest{}
-				case opGetAcl:
-					cr = &getAclRequest{}
-				case opGetChildren:
-					cr = &getChildrenRequest{}
-				case opGetChildren2:
-					cr = &getChildren2Request{}
-				case opGetData:
-					cr = &getDataRequest{}
-				case opPing:
-					cr = &pingRequest{}
-				case opSetAcl:
-					cr = &setAclRequest{}
-				case opSetData:
-					cr = &setDataRequest{}
-				case opSetWatches:
-					cr = &setWatchesRequest{}
-				case opSync:
-					cr = &syncRequest{}
 				}
 			}
 		} else {
@@ -98,37 +72,9 @@ func trace(conn1, conn2 net.Conn, client bool) {
 				} else {
 					opcode = opWatcherEvent
 				}
-				switch opcode {
-				default:
+				cr = responseStructForOp(opcode)
+				if cr == nil {
 					fmt.Printf("Unknown opcode %d\n", opcode)
-				case opClose:
-					cr = &closeResponse{}
-				case opCreate:
-					cr = &createResponse{}
-				case opDelete:
-					cr = &deleteResponse{}
-				case opExists:
-					cr = &existsResponse{}
-				case opGetAcl:
-					cr = &getAclResponse{}
-				case opGetChildren:
-					cr = &getChildrenResponse{}
-				case opGetChildren2:
-					cr = &getChildren2Response{}
-				case opGetData:
-					cr = &getDataResponse{}
-				case opPing:
-					cr = &pingResponse{}
-				case opSetAcl:
-					cr = &setAclResponse{}
-				case opSetData:
-					cr = &setDataResponse{}
-				case opSetWatches:
-					cr = &setWatchesResponse{}
-				case opSync:
-					cr = &syncResponse{}
-				case opWatcherEvent:
-					cr = &watcherEvent{}
 				}
 				if errnum != 0 {
 					cr = &struct{}{}
@@ -177,8 +123,8 @@ func trace(conn1, conn2 net.Conn, client bool) {
 	}
 }
 
-func handleConnection(conn net.Conn) {
-	zkConn, err := net.Dial("tcp", "127.0.0.1:2181")
+func handleConnection(addr string, conn net.Conn) {
+	zkConn, err := net.Dial("tcp", addr)
 	if err != nil {
 		fmt.Println(err)
 		return
@@ -187,8 +133,8 @@ func handleConnection(conn net.Conn) {
 	trace(zkConn, conn, false)
 }
 
-func StartTracer() {
-	ln, err := net.Listen("tcp", "127.0.0.1:2182")
+func StartTracer(listenAddr, serverAddr string) {
+	ln, err := net.Listen("tcp", listenAddr)
 	if err != nil {
 		panic(err)
 	}
@@ -198,6 +144,6 @@ func StartTracer() {
 			fmt.Println(err)
 			continue
 		}
-		go handleConnection(conn)
+		go handleConnection(serverAddr, conn)
 	}
 }
