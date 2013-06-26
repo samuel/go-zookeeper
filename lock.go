@@ -101,6 +101,9 @@ func (l *Lock) Lock() error {
 		_, _, ch, err := l.c.GetW(l.path + "/" + prevSeqPath)
 		if err != nil && err != ErrNoNode {
 			return err
+		} else if err != nil && err == ErrNoNode {
+			// try again
+			continue
 		}
 
 		ev := <-ch
