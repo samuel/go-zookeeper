@@ -1,7 +1,7 @@
 Native Go Zookkeeper Client Library
 ===================================
 
-Documentation: http://godoc.org/github.com/samuel/go-zookeeper
+Documentation: http://godoc.org/github.com/samuel/go-zookeeper/zk
 
 License
 -------
