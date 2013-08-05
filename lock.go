@@ -51,7 +51,7 @@ func (l *Lock) Lock() error {
 			for _, p := range parts[1:] {
 				pth += "/" + p
 				_, err := l.c.Create(pth, []byte{}, 0, l.acl)
-				if err != nil {
+				if err != nil && err != ErrNodeExists {
 					return err
 				}
 			}
