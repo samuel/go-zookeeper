@@ -403,7 +403,7 @@ func (c *Conn) sendLoop(conn net.Conn, closeChan <-chan bool) error {
 
 			conn.SetWriteDeadline(time.Now().Add(c.recvTimeout))
 			_, err = conn.Write(buf[:n+4])
-			conn.SetWriteDeadline(time.Unix(0,0))
+			conn.SetWriteDeadline(time.Time{})
 			if err != nil {
 				req.recvChan <- response{-1, err}
 				conn.Close()
@@ -419,7 +419,7 @@ func (c *Conn) sendLoop(conn net.Conn, closeChan <-chan bool) error {
 
 			conn.SetWriteDeadline(time.Now().Add(c.recvTimeout))
 			_, err = conn.Write(buf[:n+4])
-			conn.SetWriteDeadline(time.Unix(0,0))
+			conn.SetWriteDeadline(time.Time{})
 			if err != nil {
 				conn.Close()
 				return err
@@ -447,7 +447,7 @@ func (c *Conn) recvLoop(conn net.Conn) error {
 		}
 
 		_, err = io.ReadFull(conn, buf[:blen])
-		conn.SetReadDeadline(time.Unix(0,0))
+		conn.SetReadDeadline(time.Time{})
 		if err != nil {
 			return err
 		}
