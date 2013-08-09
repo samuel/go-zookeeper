@@ -3,7 +3,6 @@ package zk
 /*
 TODO:
 * make sure a ping response comes back in a reasonable time
-* timeouts on network calls
 */
 
 import (
@@ -111,7 +110,7 @@ func Connect(servers []string, recvTimeout time.Duration) (*Conn, <-chan Event, 
 		eventChan:      ec,
 		shouldQuit:     make(chan bool),
 		recvTimeout:    recvTimeout,
-		pingInterval:   10 * time.Second,
+		pingInterval:   time.Duration((int64(recvTimeout) / 2)),
 		connectTimeout: 1 * time.Second,
 		sendChan:       make(chan *request, sendChanSize),
 		requests:       make(map[int32]*request),
@@ -402,7 +401,9 @@ func (c *Conn) sendLoop(conn net.Conn, closeChan <-chan bool) error {
 			c.requests[req.xid] = req
 			c.requestsLock.Unlock()
 
+			conn.SetWriteDeadline(time.Now().Add(c.recvTimeout))
 			_, err = conn.Write(buf[:n+4])
+			conn.SetWriteDeadline(time.Time{})
 			if err != nil {
 				req.recvChan <- response{-1, err}
 				conn.Close()
@@ -416,7 +417,9 @@ func (c *Conn) sendLoop(conn net.Conn, closeChan <-chan bool) error {
 
 			binary.BigEndian.PutUint32(buf[:4], uint32(n))
 
+			conn.SetWriteDeadline(time.Now().Add(c.recvTimeout))
 			_, err = conn.Write(buf[:n+4])
+			conn.SetWriteDeadline(time.Time{})
 			if err != nil {
 				conn.Close()
 				return err
@@ -432,6 +435,7 @@ func (c *Conn) recvLoop(conn net.Conn) error {
 	buf := make([]byte, bufferSize)
 	for {
 		// package length
+		conn.SetReadDeadline(time.Now().Add(c.recvTimeout))
 		_, err := io.ReadFull(conn, buf[:4])
 		if err != nil {
 			return err
@@ -443,6 +447,7 @@ func (c *Conn) recvLoop(conn net.Conn) error {
 		}
 
 		_, err = io.ReadFull(conn, buf[:blen])
+		conn.SetReadDeadline(time.Time{})
 		if err != nil {
 			return err
 		}
