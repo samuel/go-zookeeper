@@ -355,7 +355,7 @@ func (c *Conn) authenticate() error {
 	}
 
 	if c.sessionId != r.SessionId {
-		c.xid = 0
+		atomic.StoreInt32(&c.xid, 0)
 	}
 	c.timeout = r.TimeOut
 	c.sessionId = r.SessionId
