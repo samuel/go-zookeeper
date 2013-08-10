@@ -518,10 +518,10 @@ func (c *Conn) recvLoop(conn net.Conn) error {
 				} else {
 					_, err = decodePacket(buf[16:16+blen], req.recvStruct)
 				}
-				req.recvChan <- response{res.Zxid, err}
 				if req.recvFunc != nil {
 					req.recvFunc(req, &res, err)
 				}
+				req.recvChan <- response{res.Zxid, err}
 				if req.opcode == opClose {
 					return io.EOF
 				}
