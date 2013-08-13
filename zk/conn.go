@@ -175,9 +175,12 @@ func (c *Conn) loop() {
 	for {
 		c.connect()
 		err := c.authenticate()
-		if err == ErrSessionExpired {
+		switch {
+		case err == ErrSessionExpired:
 			c.invalidateWatches(err)
-		} else if err == nil {
+		case err != nil && c.conn != nil:
+			c.conn.Close()
+		case err == nil:
 			closeChan := make(chan bool) // channel to tell send loop stop
 			var wg sync.WaitGroup
 
