@@ -538,14 +538,12 @@ func (c *Conn) nextXid() int32 {
 	return atomic.AddInt32(&c.xid, 1)
 }
 
-func (c *Conn) addWatcher(path string, watchType watchType) <-chan Event {
+func (c *Conn) addWatcher(path string, watchType watchType, ch chan Event) {
 	c.watchersLock.Lock()
 	defer c.watchersLock.Unlock()
 
-	ch := make(chan Event, 1)
 	wpt := watchPathType{path, watchType}
 	c.watchers[wpt] = append(c.watchers[wpt], ch)
-	return ch
 }
 
 func (c *Conn) queueRequest(opcode int32, req interface{}, res interface{}, recvFunc func(*request, *responseHeader, error)) <-chan response {
@@ -578,17 +576,19 @@ func (c *Conn) Children(path string) ([]string, *Stat, error) {
 }
 
 func (c *Conn) ChildrenW(path string) ([]string, *Stat, <-chan Event, error) {
-	var ech <-chan Event
 	res := &getChildren2Response{}
+	ch := make(chan Event)
 	_, err := c.request(opGetChildren2, &getChildren2Request{Path: path, Watch: true}, res, func(req *request, res *responseHeader, err error) {
 		if err == nil {
-			ech = c.addWatcher(path, watchTypeChild)
+			c.addWatcher(path, watchTypeChild, ch)
 		}
 	})
 	if err != nil {
+		close(ch)
 		return nil, nil, nil, err
 	}
-	return res.Children, &res.Stat, ech, err
+
+	return res.Children, &res.Stat, (<-chan Event)(ch), err
 }
 
 func (c *Conn) Get(path string) ([]byte, *Stat, error) {
@@ -598,17 +598,17 @@ func (c *Conn) Get(path string) ([]byte, *Stat, error) {
 }
 
 func (c *Conn) GetW(path string) ([]byte, *Stat, <-chan Event, error) {
-	var ech <-chan Event
 	res := &getDataResponse{}
+	ch := make(chan Event)
 	_, err := c.request(opGetData, &getDataRequest{Path: path, Watch: true}, res, func(req *request, res *responseHeader, err error) {
 		if err == nil {
-			ech = c.addWatcher(path, watchTypeData)
+			c.addWatcher(path, watchTypeData, ch)
 		}
 	})
 	if err != nil {
 		return nil, nil, nil, err
 	}
-	return res.Data, &res.Stat, ech, err
+	return res.Data, &res.Stat, (<-chan Event)(ch), err
 }
 
 func (c *Conn) Set(path string, data []byte, version int32) (*Stat, error) {
@@ -684,13 +684,13 @@ func (c *Conn) Exists(path string) (bool, *Stat, error) {
 }
 
 func (c *Conn) ExistsW(path string) (bool, *Stat, <-chan Event, error) {
-	var ech <-chan Event
 	res := &existsResponse{}
+	ch := make(chan Event)
 	_, err := c.request(opExists, &existsRequest{Path: path, Watch: true}, res, func(req *request, res *responseHeader, err error) {
 		if err == nil {
-			ech = c.addWatcher(path, watchTypeData)
+			c.addWatcher(path, watchTypeData, ch)
 		} else if err == ErrNoNode {
-			ech = c.addWatcher(path, watchTypeExist)
+			c.addWatcher(path, watchTypeExist, ch)
 		}
 	})
 	exists := true
@@ -699,9 +699,10 @@ func (c *Conn) ExistsW(path string) (bool, *Stat, <-chan Event, error) {
 		err = nil
 	}
 	if err != nil {
+		close(ch)
 		return false, nil, nil, err
 	}
-	return exists, &res.Stat, ech, err
+	return exists, &res.Stat, (<-chan Event)(ch), err
 }
 
 func (c *Conn) GetACL(path string) ([]ACL, *Stat, error) {
