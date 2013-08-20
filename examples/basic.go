@@ -2,8 +2,9 @@ package main
 
 import (
 	"fmt"
-	"github.com/samuel/go-zookeeper"
 	"time"
+
+	"github.com/samuel/go-zookeeper/zk"
 )
 
 func main() {
