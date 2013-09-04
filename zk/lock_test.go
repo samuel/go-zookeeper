@@ -56,6 +56,8 @@ func TestLock(t *testing.T) {
 	}
 }
 
+// This tests creating a lock with a path that's more than 1 node deep (e.g. "/test-multi-level/lock"),
+// when a part of that path already exists (i.e. "/test-multi-level" node already exists).
 func TestMultiLevelLock(t *testing.T) {
 	zk, _, err := Connect([]string{"127.0.0.1:2182"}, time.Second*15)
 	if err != nil {
@@ -64,14 +66,15 @@ func TestMultiLevelLock(t *testing.T) {
 	defer zk.Close()
 
 	acls := WorldACL(PermAll)
-	path := "/test/some-foobar/deep-123"
+	path := "/test-multi-level"
 	if p, err := zk.Create(path, []byte{1, 2, 3, 4}, 0, WorldACL(PermAll)); err != nil {
-		//t.Fatalf("Create returned error: %+v", err)
+		t.Fatalf("Create returned error: %+v", err)
 	} else if p != path {
 		t.Fatalf("Create returned different path '%s' != '%s'", p, path)
 	}
-	l := NewLock(zk, "/test/some-foobar/deep-123/path/again", acls)
-	defer zk.Delete("/test/some-foobar/deep-123/path/again", 0)
+	l := NewLock(zk, "/test-multi-level/lock", acls)
+	defer zk.Delete("/test-multi-level", -1) // Clean up what we've created for this test
+	defer zk.Delete("/test-multi-level/lock", -1)
 	if err := l.Lock(); err != nil {
 		t.Fatal(err)
 	}
