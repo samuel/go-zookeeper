@@ -443,7 +443,6 @@ func (c *Conn) sendLoop(conn net.Conn, closeChan <-chan bool) error {
 			return nil
 		}
 	}
-	panic("not reached")
 }
 
 func (c *Conn) recvLoop(conn net.Conn) error {
@@ -544,7 +543,6 @@ func (c *Conn) recvLoop(conn net.Conn) error {
 			}
 		}
 	}
-	panic("not reached")
 }
 
 func (c *Conn) nextXid() int32 {
