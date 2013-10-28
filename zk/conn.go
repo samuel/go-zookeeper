@@ -651,13 +651,15 @@ func (c *Conn) CreateProtectedEphemeralSequential(path string, data []byte, acl 
 	rootPath := strings.Join(parts[:len(parts)-1], "/")
 	protectedPath := strings.Join(parts, "/")
 
+	var newPath string
+	var children []string
 	for i := 0; i < 3; i++ {
-		newPath, err := c.Create(protectedPath, data, FlagEphemeral|FlagSequence, acl)
+		newPath, err = c.Create(protectedPath, data, FlagEphemeral|FlagSequence, acl)
 		switch err {
 		case ErrSessionExpired:
 			// No need to search for the node since it can't exist. Just try again.
 		case ErrConnectionClosed:
-			children, _, err := c.Children(rootPath)
+			children, _, err = c.Children(rootPath)
 			if err != nil {
 				return "", err
 			}

@@ -5,8 +5,10 @@ import (
 	"time"
 )
 
+const testAddr = "127.0.0.1:2182"
+
 func TestCreate(t *testing.T) {
-	zk, _, err := Connect([]string{"127.0.0.1:2182"}, time.Second*15)
+	zk, _, err := Connect([]string{testAddr}, time.Second*15)
 	if err != nil {
 		t.Fatalf("Connect returned error: %+v", err)
 	}
@@ -32,7 +34,7 @@ func TestCreate(t *testing.T) {
 }
 
 func TestMulti(t *testing.T) {
-	zk, _, err := Connect([]string{"127.0.0.1:2182"}, time.Second*15)
+	zk, _, err := Connect([]string{testAddr}, time.Second*15)
 	if err != nil {
 		t.Fatalf("Connect returned error: %+v", err)
 	}
@@ -67,7 +69,7 @@ func TestMulti(t *testing.T) {
 }
 
 func TestGetSetACL(t *testing.T) {
-	zk, _, err := Connect([]string{"127.0.0.1:2182"}, time.Second*15)
+	zk, _, err := Connect([]string{testAddr}, time.Second*15)
 	if err != nil {
 		t.Fatalf("Connect returned error: %+v", err)
 	}
@@ -116,7 +118,7 @@ func TestGetSetACL(t *testing.T) {
 }
 
 func TestAuth(t *testing.T) {
-	zk, _, err := Connect([]string{"127.0.0.1:2182"}, time.Second*15)
+	zk, _, err := Connect([]string{testAddr}, time.Second*15)
 	if err != nil {
 		t.Fatalf("Connect returned error: %+v", err)
 	}
@@ -161,7 +163,7 @@ func TestAuth(t *testing.T) {
 }
 
 func TestChildWatch(t *testing.T) {
-	zk, _, err := Connect([]string{"127.0.0.1:2182"}, time.Second*15)
+	zk, _, err := Connect([]string{testAddr}, time.Second*15)
 	if err != nil {
 		t.Fatalf("Connect returned error: %+v", err)
 	}
@@ -200,14 +202,14 @@ func TestChildWatch(t *testing.T) {
 }
 
 func TestSetWatchers(t *testing.T) {
-	zk, _, err := Connect([]string{"127.0.0.1:2182"}, time.Second*15)
+	zk, _, err := Connect([]string{testAddr}, time.Second*15)
 	if err != nil {
 		t.Fatalf("Connect returned error: %+v", err)
 	}
 	defer zk.Close()
 	zk.reconnectDelay = time.Second
 
-	zk2, _, err := Connect([]string{"127.0.0.1:2182"}, time.Second*15)
+	zk2, _, err := Connect([]string{testAddr}, time.Second*15)
 	if err != nil {
 		t.Fatalf("Connect returned error: %+v", err)
 	}
@@ -250,7 +252,7 @@ func TestSetWatchers(t *testing.T) {
 }
 
 func TestExpiringWatch(t *testing.T) {
-	zk, _, err := Connect([]string{"127.0.0.1:2182"}, time.Second)
+	zk, _, err := Connect([]string{testAddr}, time.Second)
 	if err != nil {
 		t.Fatalf("Connect returned error: %+v", err)
 	}
