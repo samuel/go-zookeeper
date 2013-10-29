@@ -63,7 +63,6 @@ func startTestCluster(size int) (*testCluster, error) {
 			return nil, err
 		}
 
-		// TODO: write myid
 		fi, err = os.Create(filepath.Join(srvPath, "myid"))
 		if err != nil {
 			return nil, err
