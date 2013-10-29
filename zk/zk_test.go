@@ -248,6 +248,16 @@ func TestSetWatchers(t *testing.T) {
 		t.Fatalf("Delete returned error: %+v", err)
 	}
 
+	testPath, err := zk.Create("/gozk-test-2", []byte{}, 0, WorldACL(PermAll))
+	if err != nil {
+		t.Fatalf("Create returned: %+v", err)
+	}
+
+	_, _, testEvCh, err := zk.GetW(testPath)
+	if err != nil {
+		t.Fatalf("GetW returned: %+v", err)
+	}
+
 	children, stat, childCh, err := zk.ChildrenW("/")
 	if err != nil {
 		t.Fatalf("Children returned error: %+v", err)
@@ -258,7 +268,10 @@ func TestSetWatchers(t *testing.T) {
 	}
 
 	zk.conn.Close()
-	time.Sleep(time.Millisecond * 50)
+	if err := zk2.Delete(testPath, -1); err != nil && err != ErrNoNode {
+		t.Fatalf("Delete returned error: %+v", err)
+	}
+	time.Sleep(time.Millisecond * 100)
 
 	if path, err := zk2.Create("/gozk-test", []byte{1, 2, 3, 4}, 0, WorldACL(PermAll)); err != nil {
 		t.Fatalf("Create returned error: %+v", err)
@@ -266,7 +279,18 @@ func TestSetWatchers(t *testing.T) {
 		t.Fatalf("Create returned different path '%s' != '/gozk-test'", path)
 	}
 
-	_ = childCh
+	select {
+	case ev := <-testEvCh:
+		if ev.Err != nil {
+			t.Fatalf("GetW watcher error %+v", ev.Err)
+		}
+		if ev.Path != testPath {
+			t.Fatalf("GetW watcher wrong path %s instead of %s", ev.Path, testPath)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("GetW watcher timed out")
+	}
+
 	select {
 	case ev := <-childCh:
 		if ev.Err != nil {
