@@ -10,8 +10,8 @@ func TestCreate(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer ts.stop()
-	zk, err := ts.connect(0)
+	defer ts.Stop()
+	zk, err := ts.ConnectAll()
 	if err != nil {
 		t.Fatalf("Connect returned error: %+v", err)
 	}
@@ -41,8 +41,8 @@ func TestMulti(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer ts.stop()
-	zk, err := ts.connect(0)
+	defer ts.Stop()
+	zk, err := ts.ConnectAll()
 	if err != nil {
 		t.Fatalf("Connect returned error: %+v", err)
 	}
@@ -81,8 +81,8 @@ func TestGetSetACL(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer ts.stop()
-	zk, err := ts.connect(0)
+	defer ts.Stop()
+	zk, err := ts.ConnectAll()
 	if err != nil {
 		t.Fatalf("Connect returned error: %+v", err)
 	}
@@ -135,8 +135,8 @@ func TestAuth(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer ts.stop()
-	zk, err := ts.connect(0)
+	defer ts.Stop()
+	zk, err := ts.ConnectAll()
 	if err != nil {
 		t.Fatalf("Connect returned error: %+v", err)
 	}
@@ -185,8 +185,8 @@ func TestChildWatch(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer ts.stop()
-	zk, err := ts.connect(0)
+	defer ts.Stop()
+	zk, err := ts.ConnectAll()
 	if err != nil {
 		t.Fatalf("Connect returned error: %+v", err)
 	}
@@ -229,8 +229,8 @@ func TestSetWatchers(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer ts.stop()
-	zk, err := ts.connect(0)
+	defer ts.Stop()
+	zk, err := ts.ConnectAll()
 	if err != nil {
 		t.Fatalf("Connect returned error: %+v", err)
 	}
@@ -238,7 +238,7 @@ func TestSetWatchers(t *testing.T) {
 
 	zk.reconnectDelay = time.Second
 
-	zk2, err := ts.connect(0)
+	zk2, err := ts.ConnectAll()
 	if err != nil {
 		t.Fatalf("Connect returned error: %+v", err)
 	}
@@ -309,8 +309,8 @@ func TestExpiringWatch(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer ts.stop()
-	zk, err := ts.connect(0)
+	defer ts.Stop()
+	zk, err := ts.ConnectAll()
 	if err != nil {
 		t.Fatalf("Connect returned error: %+v", err)
 	}

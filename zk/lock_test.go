@@ -10,8 +10,8 @@ func TestLock(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer ts.stop()
-	zk, err := ts.connect(0)
+	defer ts.Stop()
+	zk, err := ts.ConnectAll()
 	if err != nil {
 		t.Fatalf("Connect returned error: %+v", err)
 	}
@@ -68,8 +68,8 @@ func TestMultiLevelLock(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer ts.stop()
-	zk, err := ts.connect(0)
+	defer ts.Stop()
+	zk, err := ts.ConnectAll()
 	if err != nil {
 		t.Fatalf("Connect returned error: %+v", err)
 	}

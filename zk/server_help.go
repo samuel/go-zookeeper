@@ -30,7 +30,7 @@ func StartTestCluster(size int) (*TestCluster, error) {
 	cluster := &TestCluster{Path: tmpPath}
 	defer func() {
 		if !success {
-			cluster.stop()
+			cluster.Stop()
 		}
 	}()
 	for serverN := 0; serverN < size; serverN++ {
@@ -47,8 +47,8 @@ func StartTestCluster(size int) (*TestCluster, error) {
 			cfg.Servers = append(cfg.Servers, ServerConfigServer{
 				Id:                 i + 1,
 				Host:               "127.0.0.1",
-				PeerPort:           port + 1,
-				LeaderElectionPort: port + 2,
+				PeerPort:           startPort + i*3 + 1,
+				LeaderElectionPort: startPort + i*3 + 2,
 			})
 		}
 		cfgPath := filepath.Join(srvPath, "zoo.cfg")
@@ -89,12 +89,21 @@ func StartTestCluster(size int) (*TestCluster, error) {
 	return cluster, nil
 }
 
-func (ts *TestCluster) connect(idx int) (*Conn, error) {
+func (ts *TestCluster) Connect(idx int) (*Conn, error) {
 	zk, _, err := Connect([]string{fmt.Sprintf("127.0.0.1:%d", ts.Servers[idx].Port)}, time.Second*15)
 	return zk, err
 }
 
-func (ts *TestCluster) stop() error {
+func (ts *TestCluster) ConnectAll() (*Conn, error) {
+	hosts := make([]string, len(ts.Servers))
+	for i, srv := range ts.Servers {
+		hosts[i] = fmt.Sprintf("127.0.0.1:%d", srv.Port)
+	}
+	zk, _, err := Connect(hosts, time.Second*15)
+	return zk, err
+}
+
+func (ts *TestCluster) Stop() error {
 	for _, srv := range ts.Servers {
 		srv.Srv.Stop()
 	}

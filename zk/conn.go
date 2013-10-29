@@ -166,6 +166,7 @@ func (c *Conn) setState(state State) {
 }
 
 func (c *Conn) connect() {
+	c.serverIndex = (c.serverIndex + 1) % len(c.servers)
 	startIndex := c.serverIndex
 	c.setState(StateConnecting)
 	for {
