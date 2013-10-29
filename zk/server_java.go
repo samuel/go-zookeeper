@@ -85,6 +85,7 @@ func (sc ServerConfig) Marshall(w io.Writer) error {
 
 var jarSearchPaths = []string{
 	"zookeeper-*/contrib/fatjar/zookeeper-*-fatjar.jar",
+	"../zookeeper-*/contrib/fatjar/zookeeper-*-fatjar.jar",
 	"/usr/local/zookeeper-*/contrib/fatjar/zookeeper-*-fatjar.jar",
 	"/usr/local/Cellar/zookeeper/*/libexec/contrib/fatjar/zookeeper-*-fatjar.jar",
 }
