@@ -7,7 +7,7 @@ import (
 const (
 	protocolVersion = 0
 
-	defaultPort = 2181
+	DefaultPort = 2181
 )
 
 const (

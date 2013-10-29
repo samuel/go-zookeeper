@@ -1,14 +1,116 @@
 package zk
 
 import (
+	"fmt"
+	"io/ioutil"
+	"math/rand"
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 )
 
-const testAddr = "127.0.0.1:2182"
+type testServer struct {
+	path string
+	port int
+	srv  *Server
+}
+
+type testCluster struct {
+	path    string
+	servers []testServer
+}
+
+func startTestCluster(size int) (*testCluster, error) {
+	tmpPath, err := ioutil.TempDir("", "gozk")
+	if err != nil {
+		return nil, err
+	}
+	success := false
+	startPort := int(rand.Int31n(6000) + 10000)
+	cluster := &testCluster{path: tmpPath}
+	defer func() {
+		if !success {
+			cluster.stop()
+		}
+	}()
+	for serverN := 0; serverN < size; serverN++ {
+		srvPath := filepath.Join(tmpPath, fmt.Sprintf("srv%d", serverN))
+		if err := os.Mkdir(srvPath, 0700); err != nil {
+			return nil, err
+		}
+		port := startPort + serverN*3
+		cfg := ServerConfig{
+			ClientPort: port,
+			DataDir:    srvPath,
+		}
+		for i := 0; i < size; i++ {
+			cfg.Servers = append(cfg.Servers, ServerConfigServer{
+				Id:                 i + 1,
+				Host:               "127.0.0.1",
+				PeerPort:           port + 1,
+				LeaderElectionPort: port + 2,
+			})
+		}
+		cfgPath := filepath.Join(srvPath, "zoo.cfg")
+		fi, err := os.Create(cfgPath)
+		if err != nil {
+			return nil, err
+		}
+		err = cfg.Marshall(fi)
+		fi.Close()
+		if err != nil {
+			return nil, err
+		}
+
+		// TODO: write myid
+		fi, err = os.Create(filepath.Join(srvPath, "myid"))
+		if err != nil {
+			return nil, err
+		}
+		_, err = fmt.Fprintf(fi, "%d\n", serverN+1)
+		fi.Close()
+		if err != nil {
+			return nil, err
+		}
+
+		srv := &Server{
+			ConfigPath: cfgPath,
+		}
+		if err := srv.Start(); err != nil {
+			return nil, err
+		}
+		cluster.servers = append(cluster.servers, testServer{
+			path: srvPath,
+			port: cfg.ClientPort,
+			srv:  srv,
+		})
+	}
+	success = true
+	time.Sleep(time.Second) // Give the server time to become active. Should probably actually attempt to connect to verify.
+	return cluster, nil
+}
+
+func (ts *testCluster) connect(idx int) (*Conn, error) {
+	zk, _, err := Connect([]string{fmt.Sprintf("127.0.0.1:%d", ts.servers[idx].port)}, time.Second*15)
+	return zk, err
+}
+
+func (ts *testCluster) stop() error {
+	for _, srv := range ts.servers {
+		srv.srv.Stop()
+	}
+	defer os.RemoveAll(ts.path)
+	return nil
+}
 
 func TestCreate(t *testing.T) {
-	zk, _, err := Connect([]string{testAddr}, time.Second*15)
+	ts, err := startTestCluster(1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ts.stop()
+	zk, err := ts.connect(0)
 	if err != nil {
 		t.Fatalf("Connect returned error: %+v", err)
 	}
@@ -34,7 +136,12 @@ func TestCreate(t *testing.T) {
 }
 
 func TestMulti(t *testing.T) {
-	zk, _, err := Connect([]string{testAddr}, time.Second*15)
+	ts, err := startTestCluster(1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ts.stop()
+	zk, err := ts.connect(0)
 	if err != nil {
 		t.Fatalf("Connect returned error: %+v", err)
 	}
@@ -69,7 +176,12 @@ func TestMulti(t *testing.T) {
 }
 
 func TestGetSetACL(t *testing.T) {
-	zk, _, err := Connect([]string{testAddr}, time.Second*15)
+	ts, err := startTestCluster(1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ts.stop()
+	zk, err := ts.connect(0)
 	if err != nil {
 		t.Fatalf("Connect returned error: %+v", err)
 	}
@@ -118,7 +230,12 @@ func TestGetSetACL(t *testing.T) {
 }
 
 func TestAuth(t *testing.T) {
-	zk, _, err := Connect([]string{testAddr}, time.Second*15)
+	ts, err := startTestCluster(1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ts.stop()
+	zk, err := ts.connect(0)
 	if err != nil {
 		t.Fatalf("Connect returned error: %+v", err)
 	}
@@ -163,7 +280,12 @@ func TestAuth(t *testing.T) {
 }
 
 func TestChildWatch(t *testing.T) {
-	zk, _, err := Connect([]string{testAddr}, time.Second*15)
+	ts, err := startTestCluster(1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ts.stop()
+	zk, err := ts.connect(0)
 	if err != nil {
 		t.Fatalf("Connect returned error: %+v", err)
 	}
@@ -202,14 +324,20 @@ func TestChildWatch(t *testing.T) {
 }
 
 func TestSetWatchers(t *testing.T) {
-	zk, _, err := Connect([]string{testAddr}, time.Second*15)
+	ts, err := startTestCluster(1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ts.stop()
+	zk, err := ts.connect(0)
 	if err != nil {
 		t.Fatalf("Connect returned error: %+v", err)
 	}
 	defer zk.Close()
+
 	zk.reconnectDelay = time.Second
 
-	zk2, _, err := Connect([]string{testAddr}, time.Second*15)
+	zk2, err := ts.connect(0)
 	if err != nil {
 		t.Fatalf("Connect returned error: %+v", err)
 	}
@@ -252,7 +380,12 @@ func TestSetWatchers(t *testing.T) {
 }
 
 func TestExpiringWatch(t *testing.T) {
-	zk, _, err := Connect([]string{testAddr}, time.Second)
+	ts, err := startTestCluster(1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ts.stop()
+	zk, err := ts.connect(0)
 	if err != nil {
 		t.Fatalf("Connect returned error: %+v", err)
 	}
@@ -274,7 +407,6 @@ func TestExpiringWatch(t *testing.T) {
 	zk.sessionId = 99999
 	zk.conn.Close()
 
-	_ = childCh
 	select {
 	case ev := <-childCh:
 		if ev.Err != ErrSessionExpired {
