@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"time"
 )
 
 var (
@@ -18,6 +19,7 @@ type Lock struct {
 	acl      []ACL
 	lockPath string
 	seq      int
+	timeout  time.Duration
 }
 
 func NewLock(c *Conn, path string, acl []ACL) *Lock {
@@ -31,6 +33,10 @@ func NewLock(c *Conn, path string, acl []ACL) *Lock {
 func parseSeq(path string) (int, error) {
 	parts := strings.Split(path, "-")
 	return strconv.Atoi(parts[len(parts)-1])
+}
+
+func (l *Lock) SetTimeout(d time.Duration) {
+	l.timeout = d
 }
 
 func (l *Lock) Lock() error {
@@ -107,7 +113,22 @@ func (l *Lock) Lock() error {
 			continue
 		}
 
-		ev := <-ch
+		// Wait for a timeout before giving up trying to achieve the lock
+		var ev Event
+		if l.timeout == 0 {
+			ev = <-ch
+		} else {
+			select {
+			case ev = <-ch:
+			case <-time.After(l.timeout):
+				// clean up after ourself
+				if err := l.c.Delete(path, -1); err != nil {
+					return fmt.Errorf("Failed to get lock after %s, then failed to delete ourself: %v", l.timeout, err)
+				}
+				return fmt.Errorf("Failed to get lock after %v", l.timeout)
+			}
+		}
+
 		if ev.Err != nil {
 			return ev.Err
 		}
