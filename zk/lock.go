@@ -123,7 +123,7 @@ func (l *Lock) Lock() error {
 			case <-time.After(l.timeout):
 				// clean up after ourself
 				if err := l.c.Delete(path, -1); err != nil {
-					return fmt.Errorf("Failed to get lock after %s, then failed to delete ourself: %v", l.timeout, err)
+					return fmt.Errorf("Failed to get lock after %v, then failed to delete ourself: %v", l.timeout, err)
 				}
 				return fmt.Errorf("Failed to get lock after %v", l.timeout)
 			}
