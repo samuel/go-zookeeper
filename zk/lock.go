@@ -49,7 +49,12 @@ func (l *Lock) Lock() error {
 	path := ""
 	var err error
 	for i := 0; i < 3; i++ {
-		path, err = l.c.CreateProtectedEphemeralSequential(prefix, []byte{}, l.acl)
+		data := []byte{}
+		if l.timeout > 0 {
+			data, _ = time.Now().Add(l.timeout).GobEncode()
+		}
+
+		path, err = l.c.CreateProtectedEphemeralSequential(prefix, data, l.acl)
 		if err == ErrNoNode {
 			// Create parent node.
 			parts := strings.Split(l.path, "/")
@@ -76,6 +81,7 @@ func (l *Lock) Lock() error {
 		return err
 	}
 
+	var timeout time.Time
 	for {
 		children, _, err := l.c.Children(l.path)
 		if err != nil {
@@ -86,6 +92,16 @@ func (l *Lock) Lock() error {
 		prevSeq := 0
 		prevSeqPath := ""
 		for _, p := range children {
+			// check if this lock has timed out
+			data, _, _ := l.c.Get(l.path + "/" + p)
+			if len(data) > 0 {
+				timeout.GobDecode(data)
+				if timeout.After(time.Now()) {
+					l.c.Delete(l.path+"/"+p, -1)
+					continue
+				}
+			}
+
 			s, err := parseSeq(p)
 			if err != nil {
 				return err
