@@ -96,7 +96,7 @@ func (l *Lock) Lock() error {
 			data, _, _ := l.c.Get(l.path + "/" + p)
 			if len(data) > 0 {
 				timeout.GobDecode(data)
-				if timeout.After(time.Now()) {
+				if timeout.Before(time.Now()) {
 					l.c.Delete(l.path+"/"+p, -1)
 					continue
 				}
