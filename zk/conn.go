@@ -165,7 +165,7 @@ func (c *Conn) setState(state State) {
 	}
 }
 
-func (c *Conn) connect() {
+func (c *Conn) connect() error {
 	c.serverIndex = (c.serverIndex + 1) % len(c.servers)
 	startIndex := c.serverIndex
 	c.setState(StateConnecting)
@@ -174,7 +174,7 @@ func (c *Conn) connect() {
 		if err == nil {
 			c.conn = zkConn
 			c.setState(StateConnected)
-			return
+			return nil
 		}
 
 		log.Printf("Failed to connect to %s: %+v", c.servers[c.serverIndex], err)
@@ -183,12 +183,22 @@ func (c *Conn) connect() {
 		if c.serverIndex == startIndex {
 			time.Sleep(time.Second)
 		}
+		// should we bail? we don't want to lock here forever if something has called Close()
+		select {
+		case <-c.shouldQuit:
+			return fmt.Errorf("Bailing out of connect loop because shouldQuit")
+		default:
+		}
 	}
 }
 
 func (c *Conn) loop() {
 	for {
-		c.connect()
+		if err := c.connect(); err != nil {
+			// never connected
+			c.setState(StateDisconnected)
+			return
+		}
 		err := c.authenticate()
 		switch {
 		case err == ErrSessionExpired:
