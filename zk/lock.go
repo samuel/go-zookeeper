@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"time"
 )
 
 var (
@@ -18,6 +19,7 @@ type Lock struct {
 	acl      []ACL
 	lockPath string
 	seq      int
+	timeout  time.Duration
 }
 
 func NewLock(c *Conn, path string, acl []ACL) *Lock {
@@ -33,6 +35,10 @@ func parseSeq(path string) (int, error) {
 	return strconv.Atoi(parts[len(parts)-1])
 }
 
+func (l *Lock) SetTimeout(d time.Duration) {
+	l.timeout = d
+}
+
 func (l *Lock) Lock() error {
 	if l.lockPath != "" {
 		return ErrDeadlock
@@ -43,7 +49,12 @@ func (l *Lock) Lock() error {
 	path := ""
 	var err error
 	for i := 0; i < 3; i++ {
-		path, err = l.c.CreateProtectedEphemeralSequential(prefix, []byte{}, l.acl)
+		data := []byte{}
+		if l.timeout > 0 {
+			data, _ = time.Now().Add(l.timeout).GobEncode()
+		}
+
+		path, err = l.c.CreateProtectedEphemeralSequential(prefix, data, l.acl)
 		if err == ErrNoNode {
 			// Create parent node.
 			parts := strings.Split(l.path, "/")
@@ -70,6 +81,7 @@ func (l *Lock) Lock() error {
 		return err
 	}
 
+	var timeout time.Time
 	for {
 		children, _, err := l.c.Children(l.path)
 		if err != nil {
@@ -80,6 +92,16 @@ func (l *Lock) Lock() error {
 		prevSeq := 0
 		prevSeqPath := ""
 		for _, p := range children {
+			// check if this lock has timed out
+			data, _, _ := l.c.Get(l.path + "/" + p)
+			if len(data) > 0 {
+				timeout.GobDecode(data)
+				if timeout.Before(time.Now()) {
+					l.c.Delete(l.path+"/"+p, -1)
+					continue
+				}
+			}
+
 			s, err := parseSeq(p)
 			if err != nil {
 				return err
@@ -107,7 +129,27 @@ func (l *Lock) Lock() error {
 			continue
 		}
 
-		ev := <-ch
+		// Wait for a timeout before giving up trying to achieve the lock
+		var ev Event
+		if l.timeout == 0 {
+			ev = <-ch
+		} else {
+			select {
+			case ev = <-ch:
+			case <-time.After(l.timeout):
+				// clean up after ourself
+				if err := l.c.Delete(path, -1); err != nil {
+					// Delete failed, so disconnect to trigger ephemeral nodes to clear
+					if closeErr := l.c.conn.Close(); closeErr != nil {
+						return fmt.Errorf("Failed to get lock after %v, then failed to delete ourself (%v), then failed to close connection (%v)", l.timeout, err, closeErr)
+					} else {
+						return fmt.Errorf("Failed to get lock after %v, then failed to delete ourself (%v)", l.timeout, err)
+					}
+				}
+				return fmt.Errorf("Failed to get lock after %v", l.timeout)
+			}
+		}
+
 		if ev.Err != nil {
 			return ev.Err
 		}
