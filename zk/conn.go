@@ -564,6 +564,12 @@ func (c *Conn) addWatcher(path string, watchType watchType) <-chan Event {
 }
 
 func (c *Conn) queueRequest(opcode int32, req interface{}, res interface{}, recvFunc func(*request, *responseHeader, error)) <-chan response {
+	// if we haven't yet connected, then sendChan is unlistened, and so we will block forever
+	if c.State() == StateConnecting || c.State() == StateDisconnected {
+		ch := make(chan response, 1)
+		ch <- response{-1, ErrConnectionClosed}
+		return ch
+	}
 	rq := &request{
 		xid:        c.nextXid(),
 		opcode:     opcode,
