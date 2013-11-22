@@ -124,7 +124,7 @@ func ConnectWithDialer(servers []string, recvTimeout time.Duration, dialer Diale
 		eventChan:      ec,
 		shouldQuit:     make(chan bool),
 		recvTimeout:    recvTimeout,
-		pingInterval:   time.Duration((int64(recvTimeout) / 2)),
+		pingInterval:   time.Duration((int64(recvTimeout) / 3)),
 		connectTimeout: 1 * time.Second,
 		sendChan:       make(chan *request, sendChanSize),
 		requests:       make(map[int32]*request),
