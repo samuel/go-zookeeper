@@ -116,7 +116,6 @@ func ConnectWithDialer(servers []string, recvTimeout time.Duration, dialer Diale
 	if dialer == nil {
 		dialer = net.DialTimeout
 	}
-	var t int32 = 30000
 	startIndex := mathrand.Intn(len(servers))
 	conn := Conn{
 		dialer:         dialer,
@@ -127,13 +126,13 @@ func ConnectWithDialer(servers []string, recvTimeout time.Duration, dialer Diale
 		eventChan:      ec,
 		shouldQuit:     make(chan bool),
 		recvTimeout:    recvTimeout,
-		pingInterval:   time.Duration((int64(t) / 3)),
+		pingInterval:   10000 * time.Millisecond, // ping is 1/3 timeout
 		connectTimeout: 1 * time.Second,
 		sendChan:       make(chan *request, sendChanSize),
 		requests:       make(map[int32]*request),
 		watchers:       make(map[watchPathType][]chan Event),
 		passwd:         emptyPassword,
-		timeout:        t,
+		timeout:        30000,
 
 		// Debug
 		reconnectDelay: 0,
