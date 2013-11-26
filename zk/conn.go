@@ -14,6 +14,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	mathrand "math/rand"
 	"net"
 	"strconv"
 	"strings"
@@ -116,10 +117,11 @@ func ConnectWithDialer(servers []string, recvTimeout time.Duration, dialer Diale
 		dialer = net.DialTimeout
 	}
 	var t int32 = 30000
+	startIndex := mathrand.Intn(len(servers))
 	conn := Conn{
 		dialer:         dialer,
 		servers:        servers,
-		serverIndex:    0,
+		serverIndex:    startIndex,
 		conn:           nil,
 		state:          StateDisconnected,
 		eventChan:      ec,
