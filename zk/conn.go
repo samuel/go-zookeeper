@@ -14,6 +14,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	mathrand "math/rand"
 	"net"
 	"strconv"
 	"strings"
@@ -115,22 +116,24 @@ func ConnectWithDialer(servers []string, recvTimeout time.Duration, dialer Diale
 	if dialer == nil {
 		dialer = net.DialTimeout
 	}
+	var t int32 = 30000
+	startIndex := mathrand.Intn(len(servers))
 	conn := Conn{
 		dialer:         dialer,
 		servers:        servers,
-		serverIndex:    0,
+		serverIndex:    startIndex,
 		conn:           nil,
 		state:          StateDisconnected,
 		eventChan:      ec,
 		shouldQuit:     make(chan bool),
 		recvTimeout:    recvTimeout,
-		pingInterval:   time.Duration((int64(recvTimeout) / 2)),
+		pingInterval:   time.Duration((int64(t) / 3)),
 		connectTimeout: 1 * time.Second,
 		sendChan:       make(chan *request, sendChanSize),
 		requests:       make(map[int32]*request),
 		watchers:       make(map[watchPathType][]chan Event),
 		passwd:         emptyPassword,
-		timeout:        30000,
+		timeout:        t,
 
 		// Debug
 		reconnectDelay: 0,
