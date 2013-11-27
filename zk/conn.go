@@ -234,10 +234,7 @@ func (c *Conn) loop() {
 
 		c.setState(StateDisconnected)
 
-		// Yeesh
-		if err != io.EOF && err != ErrSessionExpired && !strings.Contains(err.Error(), "use of closed network connection") {
-			log.Println(err)
-		}
+		log.Println("Error in loop" + err.Error())
 
 		select {
 		case <-c.shouldQuit:
@@ -425,6 +422,7 @@ func (c *Conn) sendLoop(conn net.Conn, closeChan <-chan bool) error {
 			c.requestsLock.Lock()
 			select {
 			case <-closeChan:
+				log.Println("Quitting send loop")
 				req.recvChan <- response{-1, ErrConnectionClosed}
 				c.requestsLock.Unlock()
 				return ErrConnectionClosed
@@ -579,6 +577,7 @@ func (c *Conn) addWatcher(path string, watchType watchType) <-chan Event {
 func (c *Conn) queueRequest(opcode int32, req interface{}, res interface{}, recvFunc func(*request, *responseHeader, error)) <-chan response {
 	// if we haven't yet connected, then sendChan is unlistened, and so we will block forever
 	if c.State() == StateConnecting || c.State() == StateDisconnected {
+		log.Println("Attempting to queue request while ZK not connected")
 		ch := make(chan response, 1)
 		ch <- response{-1, ErrConnectionClosed}
 		return ch
@@ -682,6 +681,7 @@ func (c *Conn) CreateProtectedEphemeralSequential(path string, data []byte, acl 
 		case ErrSessionExpired:
 			// No need to search for the node since it can't exist. Just try again.
 		case ErrConnectionClosed:
+
 			children, _, err := c.Children(rootPath)
 			if err != nil {
 				return "", err
