@@ -117,6 +117,7 @@ func ConnectWithDialer(servers []string, recvTimeout time.Duration, dialer Diale
 		dialer = net.DialTimeout
 	}
 	startIndex := mathrand.Intn(len(servers))
+	timeout := int32(30000)
 	conn := Conn{
 		dialer:         dialer,
 		servers:        servers,
@@ -126,13 +127,13 @@ func ConnectWithDialer(servers []string, recvTimeout time.Duration, dialer Diale
 		eventChan:      ec,
 		shouldQuit:     make(chan bool),
 		recvTimeout:    recvTimeout,
-		pingInterval:   10000 * time.Millisecond, // ping is 1/3 timeout
+		pingInterval:   time.Duration(timeout/3) * time.Millisecond, // ping is 1/3 timeout
 		connectTimeout: 1 * time.Second,
 		sendChan:       make(chan *request, sendChanSize),
 		requests:       make(map[int32]*request),
 		watchers:       make(map[watchPathType][]chan Event),
 		passwd:         emptyPassword,
-		timeout:        30000,
+		timeout:        timeout,
 
 		// Debug
 		reconnectDelay: 0,
@@ -465,7 +466,7 @@ func (c *Conn) recvLoop(conn net.Conn) error {
 	buf := make([]byte, bufferSize)
 	for {
 		// package length
-		conn.SetReadDeadline(time.Now().Add(c.recvTimeout))
+		conn.SetReadDeadline(time.Now().Add(c.pingInterval + c.recvTimeout)) // In theory we should get something within ping interval
 		_, err := io.ReadFull(conn, buf[:4])
 		if err != nil {
 			return err
