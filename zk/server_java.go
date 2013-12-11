@@ -91,7 +91,14 @@ var jarSearchPaths = []string{
 }
 
 func findZookeeperFatJar() string {
-	for _, path := range jarSearchPaths {
+	var paths []string
+	zkPath := os.Getenv("ZOOKEEPER_PATH")
+	if zkPath == "" {
+		paths = jarSearchPaths
+	} else {
+		paths = []string{filepath.Join(zkPath, "contrib/fatjar/zookeeper-*-fatjar.jar")}
+	}
+	for _, path := range paths {
 		matches, _ := filepath.Glob(path)
 		// TODO: could sort by version and pick latest
 		if len(matches) > 0 {
