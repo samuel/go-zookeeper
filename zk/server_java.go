@@ -88,6 +88,7 @@ var jarSearchPaths = []string{
 	"../zookeeper-*/contrib/fatjar/zookeeper-*-fatjar.jar",
 	"/usr/local/zookeeper-*/contrib/fatjar/zookeeper-*-fatjar.jar",
 	"/usr/local/Cellar/zookeeper/*/libexec/contrib/fatjar/zookeeper-*-fatjar.jar",
+	"/usr/share/java/zookeeper-*.jar",
 }
 
 func findZookeeperFatJar() string {
