@@ -16,7 +16,7 @@ var (
 type ACL struct {
 	Perms  int32
 	Scheme string
-	Id     string
+	ID     string
 }
 
 type Stat struct {
@@ -90,14 +90,14 @@ type connectRequest struct {
 	ProtocolVersion int32
 	LastZxidSeen    int64
 	TimeOut         int32
-	SessionId       int64
+	SessionID       int64
 	Passwd          []byte
 }
 
 type connectResponse struct {
 	ProtocolVersion int32
 	TimeOut         int32
-	SessionId       int64
+	SessionID       int64
 	Passwd          []byte
 }
 
@@ -224,18 +224,18 @@ func (r *multiRequest) Encode(buf []byte) (int, error) {
 	total := 0
 	for _, op := range r.Ops {
 		op.Header.Done = false
-		if n, err := encodePacketValue(buf[total:], reflect.ValueOf(op)); err != nil {
+		n, err := encodePacketValue(buf[total:], reflect.ValueOf(op))
+		if err != nil {
 			return total, err
-		} else {
-			total += n
 		}
-	}
-	r.DoneHeader.Done = true
-	if n, err := encodePacketValue(buf[total:], reflect.ValueOf(r.DoneHeader)); err != nil {
-		return total, err
-	} else {
 		total += n
 	}
+	r.DoneHeader.Done = true
+	n, err := encodePacketValue(buf[total:], reflect.ValueOf(r.DoneHeader))
+	if err != nil {
+		return total, err
+	}
+	total += n
 
 	return total, nil
 }
@@ -246,11 +246,11 @@ func (r *multiRequest) Decode(buf []byte) (int, error) {
 	total := 0
 	for {
 		header := &multiHeader{}
-		if n, err := decodePacketValue(buf[total:], reflect.ValueOf(header)); err != nil {
+		n, err := decodePacketValue(buf[total:], reflect.ValueOf(header))
+		if err != nil {
 			return total, err
-		} else {
-			total += n
 		}
+		total += n
 		if header.Done {
 			r.DoneHeader = *header
 			break
@@ -258,13 +258,13 @@ func (r *multiRequest) Decode(buf []byte) (int, error) {
 
 		req := requestStructForOp(header.Type)
 		if req == nil {
-			return total, ErrApiError
+			return total, ErrAPIError
 		}
-		if n, err := decodePacketValue(buf[total:], reflect.ValueOf(req)); err != nil {
+		n, err = decodePacketValue(buf[total:], reflect.ValueOf(req))
+		if err != nil {
 			return total, err
-		} else {
-			total += n
 		}
+		total += n
 		r.Ops = append(r.Ops, multiRequestOp{*header, req})
 	}
 	return total, nil
@@ -276,11 +276,11 @@ func (r *multiResponse) Decode(buf []byte) (int, error) {
 	total := 0
 	for {
 		header := &multiHeader{}
-		if n, err := decodePacketValue(buf[total:], reflect.ValueOf(header)); err != nil {
+		n, err := decodePacketValue(buf[total:], reflect.ValueOf(header))
+		if err != nil {
 			return total, err
-		} else {
-			total += n
 		}
+		total += n
 		if header.Done {
 			r.DoneHeader = *header
 			break
@@ -290,7 +290,7 @@ func (r *multiResponse) Decode(buf []byte) (int, error) {
 		var w reflect.Value
 		switch header.Type {
 		default:
-			return total, ErrApiError
+			return total, ErrAPIError
 		case opCreate:
 			w = reflect.ValueOf(&res.String)
 		case opSetData:
@@ -299,11 +299,11 @@ func (r *multiResponse) Decode(buf []byte) (int, error) {
 		case opCheck, opDelete:
 		}
 		if w.IsValid() {
-			if n, err := decodePacketValue(buf[total:], w); err != nil {
+			n, err := decodePacketValue(buf[total:], w)
+			if err != nil {
 				return total, err
-			} else {
-				total += n
 			}
+			total += n
 		}
 		r.Ops = append(r.Ops, res)
 	}
@@ -374,7 +374,7 @@ func decodePacketValue(buf []byte, v reflect.Value) (int, error) {
 		}
 	case reflect.Bool:
 		v.SetBool(buf[n] != 0)
-		n += 1
+		n++
 	case reflect.Int32:
 		v.SetInt(int64(binary.BigEndian.Uint32(buf[n : n+4])))
 		n += 4
@@ -464,7 +464,7 @@ func encodePacketValue(buf []byte, v reflect.Value) (int, error) {
 		} else {
 			buf[n] = 0
 		}
-		n += 1
+		n++
 	case reflect.Int32:
 		binary.BigEndian.PutUint32(buf[n:n+4], uint32(v.Int()))
 		n += 4

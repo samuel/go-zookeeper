@@ -46,7 +46,7 @@ type Dialer func(network, address string, timeout time.Duration) (net.Conn, erro
 
 type Conn struct {
 	lastZxid  int64
-	sessionId int64
+	sessionID int64
 	state     State // must be 32-bit aligned
 	xid       int32
 	timeout   int32 // session timeout in seconds
@@ -326,7 +326,7 @@ func (c *Conn) authenticate() error {
 		ProtocolVersion: protocolVersion,
 		LastZxidSeen:    c.lastZxid,
 		TimeOut:         c.timeout,
-		SessionId:       c.sessionId,
+		SessionID:       c.sessionID,
 		Passwd:          c.passwd,
 	})
 	if err != nil {
@@ -365,19 +365,19 @@ func (c *Conn) authenticate() error {
 	if err != nil {
 		return err
 	}
-	if r.SessionId == 0 {
-		c.sessionId = 0
+	if r.SessionID == 0 {
+		c.sessionID = 0
 		c.passwd = emptyPassword
 		c.lastZxid = 0
 		c.setState(StateExpired)
 		return ErrSessionExpired
 	}
 
-	if c.sessionId != r.SessionId {
+	if c.sessionID != r.SessionID {
 		atomic.StoreInt32(&c.xid, 0)
 	}
 	c.timeout = r.TimeOut
-	c.sessionId = r.SessionId
+	c.sessionID = r.SessionID
 	c.passwd = r.Passwd
 	c.setState(StateHasSession)
 
@@ -612,7 +612,7 @@ func (c *Conn) Get(path string) ([]byte, *Stat, error) {
 	return res.Data, &res.Stat, err
 }
 
-// Get the contents of a znode and set a watch
+// GetW returns the contents of a znode and sets a watch
 func (c *Conn) GetW(path string) ([]byte, *Stat, <-chan Event, error) {
 	var ech <-chan Event
 	res := &getDataResponse{}
@@ -639,10 +639,10 @@ func (c *Conn) Create(path string, data []byte, flags int32, acl []ACL) (string,
 	return res.Path, err
 }
 
-// Fixes a race condition if the server crashes after it creates the node. On
-// reconnect the session may still be valid so the ephemeral node still exists.
-// Therefore, on reconnect we need to check if a node with a GUID generated on
-// create exists.
+// CreateProtectedEphemeralSequential fixes a race condition if the server crashes
+// after it creates the node. On reconnect the session may still be valid so the
+// ephemeral node still exists. Therefore, on reconnect we need to check if a node
+// with a GUID generated on create exists.
 func (c *Conn) CreateProtectedEphemeralSequential(path string, data []byte, acl []ACL) (string, error) {
 	var guid [16]byte
 	_, err := io.ReadFull(rand.Reader, guid[:16])

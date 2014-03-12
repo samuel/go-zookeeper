@@ -33,8 +33,8 @@ func trace(conn1, conn2 net.Conn, client bool) {
 			return
 		}
 
-		var cr interface{} = nil
-		var opcode int32 = -1
+		var cr interface{}
+		opcode := int32(-1)
 		readHeader := true
 		if client {
 			if init {

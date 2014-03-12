@@ -102,7 +102,7 @@ type ErrCode int32
 var (
 	ErrConnectionClosed        = errors.New("zk: connection closed")
 	ErrUnknown                 = errors.New("zk: unknown error")
-	ErrApiError                = errors.New("zk: api error")
+	ErrAPIError                = errors.New("zk: api error")
 	ErrNoNode                  = errors.New("zk: node does not exist")
 	ErrNoAuth                  = errors.New("zk: not authenticated")
 	ErrBadVersion              = errors.New("zk: version conflict")
@@ -119,7 +119,7 @@ var (
 	// ErrInvalidCallback         = errors.New("zk: invalid callback specified")
 	errCodeToError = map[ErrCode]error{
 		0:                          nil,
-		errApiError:                ErrApiError,
+		errAPIError:                ErrAPIError,
 		errNoNode:                  ErrNoNode,
 		errNoAuth:                  ErrNoAuth,
 		errBadVersion:              ErrBadVersion,
@@ -156,7 +156,7 @@ const (
 	errBadArguments         = -8
 	errInvalidState         = -9
 	// API errors
-	errApiError                = ErrCode(-100)
+	errAPIError                = ErrCode(-100)
 	errNoNode                  = ErrCode(-101) // *
 	errNoAuth                  = ErrCode(-102)
 	errBadVersion              = ErrCode(-103) // *

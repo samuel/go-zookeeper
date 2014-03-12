@@ -24,7 +24,7 @@ const (
 )
 
 type ServerConfigServer struct {
-	Id                 int
+	ID                 int
 	Host               string
 	PeerPort           int
 	LeaderElectionPort int
@@ -77,7 +77,7 @@ func (sc ServerConfig) Marshall(w io.Writer) error {
 			if srv.LeaderElectionPort <= 0 {
 				srv.LeaderElectionPort = DefaultLeaderElectionPort
 			}
-			fmt.Fprintf(w, "server.%d=%s:%d:%d\n", srv.Id, srv.Host, srv.PeerPort, srv.LeaderElectionPort)
+			fmt.Fprintf(w, "server.%d=%s:%d:%d\n", srv.ID, srv.Host, srv.PeerPort, srv.LeaderElectionPort)
 		}
 	}
 	return nil

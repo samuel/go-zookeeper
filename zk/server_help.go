@@ -45,7 +45,7 @@ func StartTestCluster(size int) (*TestCluster, error) {
 		}
 		for i := 0; i < size; i++ {
 			cfg.Servers = append(cfg.Servers, ServerConfigServer{
-				Id:                 i + 1,
+				ID:                 i + 1,
 				Host:               "127.0.0.1",
 				PeerPort:           startPort + i*3 + 1,
 				LeaderElectionPort: startPort + i*3 + 2,

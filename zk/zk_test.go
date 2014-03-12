@@ -356,7 +356,7 @@ func TestExpiringWatch(t *testing.T) {
 		t.Fatal("Children should return at least 1 child")
 	}
 
-	zk.sessionId = 99999
+	zk.sessionID = 99999
 	zk.conn.Close()
 
 	select {
