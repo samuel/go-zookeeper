@@ -222,6 +222,33 @@ func TestChildWatch(t *testing.T) {
 	case _ = <-time.After(time.Second * 2):
 		t.Fatal("Child watcher timed out")
 	}
+
+	// Delete of the watched node should trigger the watch
+
+	children, stat, childCh, err = zk.ChildrenW("/gozk-test")
+	if err != nil {
+		t.Fatalf("Children returned error: %+v", err)
+	} else if stat == nil {
+		t.Fatal("Children returned nil stat")
+	} else if len(children) != 0 {
+		t.Fatal("Children should return 0 children")
+	}
+
+	if err := zk.Delete("/gozk-test", -1); err != nil && err != ErrNoNode {
+		t.Fatalf("Delete returned error: %+v", err)
+	}
+
+	select {
+	case ev := <-childCh:
+		if ev.Err != nil {
+			t.Fatalf("Child watcher error %+v", ev.Err)
+		}
+		if ev.Path != "/gozk-test" {
+			t.Fatalf("Child watcher wrong path %s instead of %s", ev.Path, "/")
+		}
+	case _ = <-time.After(time.Second * 2):
+		t.Fatal("Child watcher timed out")
+	}
 }
 
 func TestSetWatchers(t *testing.T) {
