@@ -154,9 +154,10 @@ func ConnectWithDialer(servers []string, recvTimeout time.Duration, dialer Diale
 
 func (c *Conn) Close() {
 	close(c.shouldQuit)
+	_, rspChan := c.queueRequest(opClose, &closeRequest{}, &closeResponse{}, nil)
 
 	select {
-	case <-c.queueRequest(opClose, &closeRequest{}, &closeResponse{}, nil):
+	case <-rspChan:
 	case <-time.After(time.Second):
 	}
 }
@@ -592,13 +593,13 @@ func (c *Conn) addWatcher(path string, watchType watchType) <-chan Event {
 	return ch
 }
 
-func (c *Conn) queueRequest(opcode int32, req interface{}, res interface{}, recvFunc func(*request, *responseHeader, error)) <-chan response {
+func (c *Conn) queueRequest(opcode int32, req interface{}, res interface{}, recvFunc func(*request, *responseHeader, error)) (int32, <-chan response) {
 	// if we haven't yet connected, then sendChan is unlistened, and so we will block forever
 	if c.State() == StateConnecting || c.State() == StateDisconnected {
 		log.Warnf("[Zookeeper] Attempting to queue request while ZK not connected")
 		ch := make(chan response, 1)
 		ch <- response{-1, ErrConnectionClosed}
-		return ch
+		return -1, ch
 	}
 	rq := &request{
 		xid:        c.nextXid(),
@@ -609,13 +610,16 @@ func (c *Conn) queueRequest(opcode int32, req interface{}, res interface{}, recv
 		recvFunc:   recvFunc,
 	}
 	c.sendChan <- rq
-	return rq.recvChan
+	return rq.xid, rq.recvChan
 }
 
 func (c *Conn) request(opcode int32, req interface{}, res interface{}, recvFunc func(*request, *responseHeader, error)) (int64, error) {
 	var r response
+	_, rspChan := c.queueRequest(opcode, req, res, recvFunc)
+
+	// Wait for response, or timeout
 	select {
-	case r = <-c.queueRequest(opcode, req, res, recvFunc):
+	case r = <-rspChan:
 		return r.zxid, r.err
 	case <-time.After(c.requestTimeout):
 		// Request timed out, clean up
