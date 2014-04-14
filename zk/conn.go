@@ -613,8 +613,16 @@ func (c *Conn) queueRequest(opcode int32, req interface{}, res interface{}, recv
 }
 
 func (c *Conn) request(opcode int32, req interface{}, res interface{}, recvFunc func(*request, *responseHeader, error)) (int64, error) {
-	r := <-c.queueRequest(opcode, req, res, recvFunc)
-	return r.zxid, r.err
+	var r response
+	select {
+	case r = <-c.queueRequest(opcode, req, res, recvFunc):
+		return r.zxid, r.err
+	case <-time.After(c.requestTimeout):
+		// Request timed out, clean up
+		// @todo actually clean up
+		log.Warnf("[Zookeeper] Request timed out after %v", c.requestTimeout)
+		return 0, fmt.Errorf("Request timed out after %v", c.requestTimeout)
+	}
 }
 
 func (c *Conn) AddAuth(scheme string, auth []byte) error {
