@@ -29,6 +29,9 @@ const (
 	eventChanSize   = 6
 	sendChanSize    = 16
 	protectedPrefix = "_c_"
+
+	defaultRequestTimeout = time.Second * 3
+	minRequestTimeout     = time.Millisecond * 5
 )
 
 type watchType int
@@ -63,6 +66,7 @@ type Conn struct {
 	pingInterval   time.Duration
 	recvTimeout    time.Duration
 	connectTimeout time.Duration
+	requestTimeout time.Duration
 
 	sendChan     chan *request
 	requests     map[int32]*request // Xid -> pending request
@@ -135,6 +139,7 @@ func ConnectWithDialer(servers []string, recvTimeout time.Duration, dialer Diale
 		watchers:       make(map[watchPathType][]chan Event),
 		passwd:         emptyPassword,
 		timeout:        timeout,
+		requestTimeout: defaultRequestTimeout,
 
 		// Debug
 		reconnectDelay: 0,
@@ -154,6 +159,13 @@ func (c *Conn) Close() {
 	case <-c.queueRequest(opClose, &closeRequest{}, &closeResponse{}, nil):
 	case <-time.After(time.Second):
 	}
+}
+
+// SetRequestTimeout allows the default request timeout to be overridden for this connection
+// @todo support per request timeouts
+func (c *Conn) SetRequestTimeout(d time.Duration) error {
+	c.requestTimeout = d
+	return nil
 }
 
 func (c *Conn) State() State {
