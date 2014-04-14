@@ -615,7 +615,7 @@ func (c *Conn) queueRequest(opcode int32, req interface{}, res interface{}, recv
 
 func (c *Conn) request(opcode int32, req interface{}, res interface{}, recvFunc func(*request, *responseHeader, error)) (int64, error) {
 	var r response
-	_, rspChan := c.queueRequest(opcode, req, res, recvFunc)
+	xid, rspChan := c.queueRequest(opcode, req, res, recvFunc)
 
 	// Wait for response, or timeout
 	select {
@@ -623,8 +623,15 @@ func (c *Conn) request(opcode int32, req interface{}, res interface{}, recvFunc 
 		return r.zxid, r.err
 	case <-time.After(c.requestTimeout):
 		// Request timed out, clean up
-		// @todo actually clean up
 		log.Warnf("[Zookeeper] Request timed out after %v", c.requestTimeout)
+
+		// Delete the outstanding request from the map, we will then ignore any response
+		c.requestsLock.Lock()
+		defer c.requestsLock.Unlock()
+		if _, ok := c.requests[xid]; ok {
+			delete(c.requests, xid)
+		}
+
 		return -1, fmt.Errorf("Request timed out after %v", c.requestTimeout)
 	}
 }
