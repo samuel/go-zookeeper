@@ -13,7 +13,6 @@ import (
 	"encoding/binary"
 	"fmt"
 	"io"
-	"log"
 	mathrand "math/rand"
 	"net"
 	"strconv"
@@ -21,6 +20,8 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
+	log "github.com/cihub/seelog"
 )
 
 const (
@@ -180,7 +181,7 @@ func (c *Conn) connect() error {
 			return nil
 		}
 
-		log.Printf("Failed to connect to %s: %+v", c.servers[c.serverIndex], err)
+		log.Warnf("[Zookeeper] Failed to connect to %s: %+v", c.servers[c.serverIndex], err)
 
 		c.serverIndex = (c.serverIndex + 1) % len(c.servers)
 		if c.serverIndex == startIndex {
@@ -234,7 +235,7 @@ func (c *Conn) loop() {
 
 		c.setState(StateDisconnected)
 
-		log.Println("Error in loop" + err.Error())
+		log.Warnf("[Zookeeper] Error in loop" + err.Error())
 
 		select {
 		case <-c.shouldQuit:
@@ -322,7 +323,8 @@ func (c *Conn) sendSetWatches() {
 		res := &setWatchesResponse{}
 		_, err := c.request(opSetWatches, req, res, nil)
 		if err != nil {
-			log.Fatal(err)
+			log.Criticalf("[Zookeeper] %s", err.Error())
+			panic(err)
 		}
 	}()
 }
@@ -422,7 +424,7 @@ func (c *Conn) sendLoop(conn net.Conn, closeChan <-chan bool) error {
 			c.requestsLock.Lock()
 			select {
 			case <-closeChan:
-				log.Println("Quitting send loop")
+				log.Debugf("[Zookeeper] Quitting send loop")
 				req.recvChan <- response{-1, ErrConnectionClosed}
 				c.requestsLock.Unlock()
 				return ErrConnectionClosed
@@ -440,6 +442,10 @@ func (c *Conn) sendLoop(conn net.Conn, closeChan <-chan bool) error {
 				return err
 			}
 		case <-pingTicker.C:
+
+			// Use our ping ticker to track how busy we are
+			log.Debugf("[Zookeeper] %v requests in flight", len(c.requests))
+
 			n, err := encodePacket(buf[4:], &requestHeader{Xid: -2, Opcode: opPing})
 			if err != nil {
 				panic("zk: opPing should never fail to serialize")
@@ -527,7 +533,7 @@ func (c *Conn) recvLoop(conn net.Conn) error {
 		} else if res.Xid == -2 {
 			// Ping response. Ignore.
 		} else if res.Xid < 0 {
-			log.Printf("Xid < 0 (%d) but not ping or watcher event", res.Xid)
+			log.Warnf("[Zookeeper] Xid < 0 (%d) but not ping or watcher event", res.Xid)
 		} else {
 			if res.Zxid > 0 {
 				c.lastZxid = res.Zxid
@@ -541,7 +547,7 @@ func (c *Conn) recvLoop(conn net.Conn) error {
 			c.requestsLock.Unlock()
 
 			if !ok {
-				log.Printf("Response for unknown request with xid %d", res.Xid)
+				log.Warnf("[Zookeeper] Response for unknown request with xid %d", res.Xid)
 			} else {
 				if res.Err != 0 {
 					err = res.Err.toError()
@@ -577,7 +583,7 @@ func (c *Conn) addWatcher(path string, watchType watchType) <-chan Event {
 func (c *Conn) queueRequest(opcode int32, req interface{}, res interface{}, recvFunc func(*request, *responseHeader, error)) <-chan response {
 	// if we haven't yet connected, then sendChan is unlistened, and so we will block forever
 	if c.State() == StateConnecting || c.State() == StateDisconnected {
-		log.Println("Attempting to queue request while ZK not connected")
+		log.Warnf("[Zookeeper] Attempting to queue request while ZK not connected")
 		ch := make(chan response, 1)
 		ch <- response{-1, ErrConnectionClosed}
 		return ch
