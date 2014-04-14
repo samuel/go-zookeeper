@@ -621,7 +621,7 @@ func (c *Conn) request(opcode int32, req interface{}, res interface{}, recvFunc 
 		// Request timed out, clean up
 		// @todo actually clean up
 		log.Warnf("[Zookeeper] Request timed out after %v", c.requestTimeout)
-		return 0, fmt.Errorf("Request timed out after %v", c.requestTimeout)
+		return -1, fmt.Errorf("Request timed out after %v", c.requestTimeout)
 	}
 }
 
