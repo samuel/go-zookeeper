@@ -162,6 +162,13 @@ func (c *Conn) Close() {
 	}
 }
 
+// CloseConnection closes the underlying network connection to zookeeper
+// This will trigger both the send and recv loops to exit and requests to flush
+// and then we will automatically attempt to reconnect
+func (c *Conn) CloseConnection() error {
+	return c.conn.Close()
+}
+
 // SetRequestTimeout allows the default request timeout to be overridden for this connection
 // @todo support per request timeouts
 func (c *Conn) SetRequestTimeout(d time.Duration) error {
