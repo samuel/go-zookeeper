@@ -632,7 +632,7 @@ func (c *Conn) request(opcode int32, req interface{}, res interface{}, recvFunc 
 			delete(c.requests, xid)
 		}
 
-		return -1, fmt.Errorf("Request timed out after %v", c.requestTimeout)
+		return -1, ErrRequestTimeout
 	}
 }
 
