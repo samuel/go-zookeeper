@@ -162,10 +162,10 @@ func (c *Conn) Close() {
 	}
 }
 
-// CloseConnection closes the underlying network connection to zookeeper
+// Reconnect closes the underlying network connection to zookeeper
 // This will trigger both the send and recv loops to exit and requests to flush
 // and then we will automatically attempt to reconnect
-func (c *Conn) CloseConnection() error {
+func (c *Conn) Reconnect() error {
 	return c.conn.Close()
 }
 
