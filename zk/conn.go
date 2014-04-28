@@ -121,8 +121,8 @@ func ConnectWithDialer(servers []string, recvTimeout time.Duration, dialer Diale
 	if dialer == nil {
 		dialer = net.DialTimeout
 	}
-	mathrand.Seed(time.Now().UnixNano())
-	startIndex := mathrand.Intn(len(servers))
+	r := mathrand.New(mathrand.NewSource(time.Now().UnixNano()))
+	startIndex := r.Intn(len(servers))
 	timeout := int32(30000)
 	conn := Conn{
 		dialer:         dialer,
