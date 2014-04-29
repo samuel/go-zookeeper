@@ -9,8 +9,9 @@ import (
 )
 
 var (
-	ErrDeadlock  = errors.New("zk: trying to acquire a lock twice")
-	ErrNotLocked = errors.New("zk: not locked")
+	ErrDeadlock    = errors.New("zk: trying to acquire a lock twice")
+	ErrNotLocked   = errors.New("zk: not locked")
+	ErrLockTimeout = errors.New("zk: timeout trying to acquire lock")
 )
 
 type Lock struct {
@@ -36,53 +37,52 @@ func parseSeq(path string) (int, error) {
 	return strconv.Atoi(parts[len(parts)-1])
 }
 
+// SetTimeout sets the time we will wait to acquire the lock, bail out if time is exceeded
 func (l *Lock) SetTimeout(d time.Duration) {
 	l.acquisitionTimeout = d
 }
 
+// SetTTL sets the max time that the lock should live for
 func (l *Lock) SetTTL(d time.Duration) {
 	l.ttl = d
 }
 
+// Lock attempts to acquire a lock.
+// Uses the recipe http://zookeeper.apache.org/doc/trunk/recipes.html#sc_recipes_Locks.
+// Timeout achieved by first creating the lock node and then waiting X secs. If lock not yet acquired it will delete and then return.
+// Does not account for initial request taking too long
 func (l *Lock) Lock() error {
 	if l.lockPath != "" {
 		return ErrDeadlock
-	}
-
-	// For backwards compatibility, if timeout is set but TTL isn't use the same value for both
-	if l.ttl == 0 && l.acquisitionTimeout != 0 {
-		l.ttl = l.acquisitionTimeout
 	}
 
 	prefix := fmt.Sprintf("%s/lock-", l.path)
 
 	path := ""
 	var err error
-	for i := 0; i < 3; i++ {
-		data := []byte{}
-		if l.ttl > 0 {
-			data, _ = time.Now().Add(l.ttl).GobEncode()
-		}
-
-		path, err = l.c.CreateProtectedEphemeralSequential(prefix, data, l.acl)
-		if err == ErrNoNode {
-			// Create parent node.
-			parts := strings.Split(l.path, "/")
-			pth := ""
-			for _, p := range parts[1:] {
-				pth += "/" + p
-				_, err := l.c.Create(pth, []byte{}, 0, l.acl)
-				if err != nil && err != ErrNodeExists {
-					return err
-				}
+	data := []byte{}
+	if l.ttl > 0 {
+		data, _ = time.Now().Add(l.ttl).GobEncode()
+	}
+	maxEnd := time.Now().Add(l.acquisitionTimeout)
+	path, err = l.c.CreateProtectedEphemeralSequential(prefix, data, l.acl)
+	if err == ErrNoNode {
+		// Create parent nodes and try again
+		parts := strings.Split(l.path, "/")
+		pth := ""
+		for _, p := range parts[1:] {
+			pth += "/" + p
+			_, err := l.c.Create(pth, []byte{}, 0, l.acl)
+			if err != nil && err != ErrNodeExists {
+				// Timeout error could be here too
+				return err
 			}
-		} else if err == nil {
-			break
-		} else {
+		}
+		path, err = l.c.CreateProtectedEphemeralSequential(prefix, data, l.acl)
+		if err != nil {
 			return err
 		}
-	}
-	if err != nil {
+	} else if err != nil {
 		return err
 	}
 
@@ -91,6 +91,7 @@ func (l *Lock) Lock() error {
 		return err
 	}
 
+	// wait for lock to be acquired
 	var ttl time.Time
 	for {
 		children, _, err := l.c.Children(l.path)
@@ -102,7 +103,7 @@ func (l *Lock) Lock() error {
 		prevSeq := 0
 		prevSeqPath := ""
 		for _, p := range children {
-			// check if this lock has timed out
+			// check if this lock has timed out TODO keep this?
 			data, _, _ := l.c.Get(l.path + "/" + p)
 			if len(data) > 0 {
 				ttl.GobDecode(data)
@@ -130,7 +131,7 @@ func (l *Lock) Lock() error {
 			break
 		}
 
-		// Wait on the node next in line for the lock
+		// Wait on the node next in line for the lock by setting watcher
 		_, _, ch, err := l.c.GetW(l.path + "/" + prevSeqPath)
 		if err != nil && err != ErrNoNode {
 			return err
@@ -142,21 +143,13 @@ func (l *Lock) Lock() error {
 		// Wait for a timeout period before giving up trying to achieve the lock
 		var ev Event
 		if l.acquisitionTimeout == 0 {
-			ev = <-ch
+			ev = <-ch // watch event fired
 		} else {
 			select {
-			case ev = <-ch:
-			case <-time.After(l.acquisitionTimeout):
+			case ev = <-ch: // watch event fired
+			case <-time.After(maxEnd.Sub(time.Now())): // handles -ve
 				// clean up after ourself
-				if err := l.c.Delete(path, -1); err != nil {
-					// Delete failed, so disconnect to trigger ephemeral nodes to clear
-					if closeErr := l.c.conn.Close(); closeErr != nil {
-						return fmt.Errorf("Failed to get lock after %v, then failed to delete ourself (%v), then failed to close connection (%v)", l.acquisitionTimeout, err, closeErr)
-					} else {
-						return fmt.Errorf("Failed to get lock after %v, then failed to delete ourself (%v)", l.acquisitionTimeout, err)
-					}
-				}
-				return fmt.Errorf("Failed to get lock after %v", l.acquisitionTimeout)
+				return l.cleanUpTimeoutLock(path)
 			}
 		}
 
@@ -164,10 +157,21 @@ func (l *Lock) Lock() error {
 			return ev.Err
 		}
 	}
-
 	l.seq = seq
 	l.lockPath = path
 	return nil
+}
+
+func (l *Lock) cleanUpTimeoutLock(path string) error {
+	if err := l.c.Delete(path, -1); err != nil {
+		// Delete failed, so disconnect to trigger ephemeral nodes to clear
+		if closeErr := l.c.conn.Close(); closeErr != nil {
+			return fmt.Errorf("Failed to get lock after %v, then failed to delete ourself (%v), then failed to close connection (%v)", l.acquisitionTimeout, err, closeErr)
+		} else {
+			return fmt.Errorf("Failed to get lock after %v, then failed to delete ourself (%v)", l.acquisitionTimeout, err)
+		}
+	}
+	return ErrLockTimeout
 }
 
 func (l *Lock) Unlock() error {
