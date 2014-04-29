@@ -92,40 +92,8 @@ func (l *Lock) Lock() error {
 	}
 
 	// wait for lock to be acquired
-	var ttl time.Time
 	for {
-		children, _, err := l.c.Children(l.path)
-		if err != nil {
-			return err
-		}
-
-		lowestSeq := seq
-		prevSeq := 0
-		prevSeqPath := ""
-		for _, p := range children {
-			// check if this lock has timed out TODO keep this?
-			data, _, _ := l.c.Get(l.path + "/" + p)
-			if len(data) > 0 {
-				ttl.GobDecode(data)
-				if ttl.Before(time.Now()) {
-					l.c.Delete(l.path+"/"+p, -1)
-					continue
-				}
-			}
-
-			s, err := parseSeq(p)
-			if err != nil {
-				return err
-			}
-			if s < lowestSeq {
-				lowestSeq = s
-			}
-			if s < seq && s > prevSeq {
-				prevSeq = s
-				prevSeqPath = p
-			}
-		}
-
+		lowestSeq, prevSeqPath, err := l.findLowestSequenceNode(seq)
 		if seq == lowestSeq {
 			// Acquired the lock
 			break
@@ -160,6 +128,42 @@ func (l *Lock) Lock() error {
 	l.seq = seq
 	l.lockPath = path
 	return nil
+}
+
+func (l *Lock) findLowestSequenceNode(seq int) (lowestSeq int, prevSeqPath string, err error) {
+	children, _, err := l.c.Children(l.path)
+	if err != nil {
+		return -1, "", err
+	}
+
+	var ttl time.Time
+	lowestSeq = seq
+	prevSeq := 0
+	prevSeqPath = ""
+	for _, p := range children {
+		// check if this lock has timed out TODO keep this?
+		data, _, _ := l.c.Get(l.path + "/" + p)
+		if len(data) > 0 {
+			ttl.GobDecode(data)
+			if ttl.Before(time.Now()) {
+				l.c.Delete(l.path+"/"+p, -1)
+				continue
+			}
+		}
+
+		s, err := parseSeq(p)
+		if err != nil {
+			return -1, "", err
+		}
+		if s < lowestSeq {
+			lowestSeq = s
+		}
+		if s < seq && s > prevSeq {
+			prevSeq = s
+			prevSeqPath = p
+		}
+	}
+	return lowestSeq, prevSeqPath, err
 }
 
 func (l *Lock) cleanUpTimeoutLock(path string) error {
