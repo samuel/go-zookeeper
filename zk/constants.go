@@ -115,6 +115,7 @@ var (
 	ErrClosing                 = errors.New("zk: zookeeper is closing")
 	ErrNothing                 = errors.New("zk: no server responsees to process")
 	ErrSessionMoved            = errors.New("zk: session moved to another server, so operation is ignored")
+	ErrRequestTimeout          = errors.New("zk: request timed out")
 
 	// ErrInvalidCallback         = errors.New("zk: invalid callback specified")
 	errCodeToError = map[ErrCode]error{

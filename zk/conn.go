@@ -13,13 +13,15 @@ import (
 	"encoding/binary"
 	"fmt"
 	"io"
-	"log"
+	mathrand "math/rand"
 	"net"
 	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
+
+	log "github.com/cihub/seelog"
 )
 
 const (
@@ -115,22 +117,25 @@ func ConnectWithDialer(servers []string, recvTimeout time.Duration, dialer Diale
 	if dialer == nil {
 		dialer = net.DialTimeout
 	}
+	r := mathrand.New(mathrand.NewSource(time.Now().UnixNano()))
+	startIndex := r.Intn(len(servers))
+	timeout := int32(30000)
 	conn := Conn{
 		dialer:         dialer,
 		servers:        servers,
-		serverIndex:    0,
+		serverIndex:    startIndex,
 		conn:           nil,
 		state:          StateDisconnected,
 		eventChan:      ec,
 		shouldQuit:     make(chan bool),
 		recvTimeout:    recvTimeout,
-		pingInterval:   time.Duration((int64(recvTimeout) / 2)),
+		pingInterval:   time.Duration(timeout/3) * time.Millisecond, // ping is 1/3 timeout
 		connectTimeout: 1 * time.Second,
 		sendChan:       make(chan *request, sendChanSize),
 		requests:       make(map[int32]*request),
 		watchers:       make(map[watchPathType][]chan Event),
 		passwd:         emptyPassword,
-		timeout:        30000,
+		timeout:        timeout,
 
 		// Debug
 		reconnectDelay: 0,
@@ -145,11 +150,19 @@ func ConnectWithDialer(servers []string, recvTimeout time.Duration, dialer Diale
 
 func (c *Conn) Close() {
 	close(c.shouldQuit)
+	rspChan := c.queueRequest(opClose, &closeRequest{}, &closeResponse{}, nil)
 
 	select {
-	case <-c.queueRequest(opClose, &closeRequest{}, &closeResponse{}, nil):
+	case <-rspChan:
 	case <-time.After(time.Second):
 	}
+}
+
+// Reconnect closes the underlying network connection to zookeeper
+// This will trigger both the send and recv loops to exit and requests to flush
+// and then we will automatically attempt to reconnect
+func (c *Conn) Reconnect() error {
+	return c.conn.Close()
 }
 
 func (c *Conn) State() State {
@@ -165,7 +178,7 @@ func (c *Conn) setState(state State) {
 	}
 }
 
-func (c *Conn) connect() {
+func (c *Conn) connect() error {
 	c.serverIndex = (c.serverIndex + 1) % len(c.servers)
 	startIndex := c.serverIndex
 	c.setState(StateConnecting)
@@ -174,21 +187,31 @@ func (c *Conn) connect() {
 		if err == nil {
 			c.conn = zkConn
 			c.setState(StateConnected)
-			return
+			return nil
 		}
 
-		log.Printf("Failed to connect to %s: %+v", c.servers[c.serverIndex], err)
+		log.Warnf("[Zookeeper] Failed to connect to %s: %+v", c.servers[c.serverIndex], err)
 
 		c.serverIndex = (c.serverIndex + 1) % len(c.servers)
 		if c.serverIndex == startIndex {
 			time.Sleep(time.Second)
+		}
+		// should we bail? we don't want to lock here forever if something has called Close()
+		select {
+		case <-c.shouldQuit:
+			return fmt.Errorf("Bailing out of connect loop because shouldQuit")
+		default:
 		}
 	}
 }
 
 func (c *Conn) loop() {
 	for {
-		c.connect()
+		if err := c.connect(); err != nil {
+			// never connected
+			c.setState(StateDisconnected)
+			return
+		}
 		err := c.authenticate()
 		switch {
 		case err == ErrSessionExpired:
@@ -221,10 +244,7 @@ func (c *Conn) loop() {
 
 		c.setState(StateDisconnected)
 
-		// Yeesh
-		if err != io.EOF && err != ErrSessionExpired && !strings.Contains(err.Error(), "use of closed network connection") {
-			log.Println(err)
-		}
+		log.Warnf("[Zookeeper] Error in loop" + err.Error())
 
 		select {
 		case <-c.shouldQuit:
@@ -312,7 +332,8 @@ func (c *Conn) sendSetWatches() {
 		res := &setWatchesResponse{}
 		_, err := c.request(opSetWatches, req, res, nil)
 		if err != nil {
-			log.Fatal(err)
+			log.Criticalf("[Zookeeper] %s", err.Error())
+			panic(err)
 		}
 	}()
 }
@@ -412,6 +433,7 @@ func (c *Conn) sendLoop(conn net.Conn, closeChan <-chan bool) error {
 			c.requestsLock.Lock()
 			select {
 			case <-closeChan:
+				log.Debugf("[Zookeeper] Quitting send loop")
 				req.recvChan <- response{-1, ErrConnectionClosed}
 				c.requestsLock.Unlock()
 				return ErrConnectionClosed
@@ -429,6 +451,10 @@ func (c *Conn) sendLoop(conn net.Conn, closeChan <-chan bool) error {
 				return err
 			}
 		case <-pingTicker.C:
+
+			// Use our ping ticker to track how busy we are
+			log.Debugf("[Zookeeper] %v requests in flight", len(c.requests))
+
 			n, err := encodePacket(buf[4:], &requestHeader{Xid: -2, Opcode: opPing})
 			if err != nil {
 				panic("zk: opPing should never fail to serialize")
@@ -453,7 +479,7 @@ func (c *Conn) recvLoop(conn net.Conn) error {
 	buf := make([]byte, bufferSize)
 	for {
 		// package length
-		conn.SetReadDeadline(time.Now().Add(c.recvTimeout))
+		conn.SetReadDeadline(time.Now().Add(c.pingInterval + c.recvTimeout)) // In theory we should get something within ping interval
 		_, err := io.ReadFull(conn, buf[:4])
 		if err != nil {
 			return err
@@ -516,7 +542,7 @@ func (c *Conn) recvLoop(conn net.Conn) error {
 		} else if res.Xid == -2 {
 			// Ping response. Ignore.
 		} else if res.Xid < 0 {
-			log.Printf("Xid < 0 (%d) but not ping or watcher event", res.Xid)
+			log.Warnf("[Zookeeper] Xid < 0 (%d) but not ping or watcher event", res.Xid)
 		} else {
 			if res.Zxid > 0 {
 				c.lastZxid = res.Zxid
@@ -530,7 +556,7 @@ func (c *Conn) recvLoop(conn net.Conn) error {
 			c.requestsLock.Unlock()
 
 			if !ok {
-				log.Printf("Response for unknown request with xid %d", res.Xid)
+				log.Warnf("Received response for unrecognised transaction %d", res.Xid)
 			} else {
 				if res.Err != 0 {
 					err = res.Err.toError()
@@ -563,7 +589,15 @@ func (c *Conn) addWatcher(path string, watchType watchType) <-chan Event {
 	return ch
 }
 
+// queueRequest queues the request for the sendLoop to process
 func (c *Conn) queueRequest(opcode int32, req interface{}, res interface{}, recvFunc func(*request, *responseHeader, error)) <-chan response {
+	// if we haven't yet connected, then sendChan is unlistened, and so we will block forever
+	if c.State() == StateConnecting || c.State() == StateDisconnected {
+		log.Warnf("[Zookeeper] Attempting to queue request while ZK not connected")
+		ch := make(chan response, 1)
+		ch <- response{-1, ErrConnectionClosed}
+		return ch
+	}
 	rq := &request{
 		xid:        c.nextXid(),
 		opcode:     opcode,
@@ -576,6 +610,7 @@ func (c *Conn) queueRequest(opcode int32, req interface{}, res interface{}, recv
 	return rq.recvChan
 }
 
+// request queues a request on to the sendLoop and waits for the recvLoop to receive and dispatch the response
 func (c *Conn) request(opcode int32, req interface{}, res interface{}, recvFunc func(*request, *responseHeader, error)) (int64, error) {
 	r := <-c.queueRequest(opcode, req, res, recvFunc)
 	return r.zxid, r.err
@@ -645,6 +680,7 @@ func (c *Conn) Create(path string, data []byte, flags int32, acl []ACL) (string,
 // with a GUID generated on create exists.
 func (c *Conn) CreateProtectedEphemeralSequential(path string, data []byte, acl []ACL) (string, error) {
 	var guid [16]byte
+
 	_, err := io.ReadFull(rand.Reader, guid[:16])
 	if err != nil {
 		return "", err
@@ -663,6 +699,7 @@ func (c *Conn) CreateProtectedEphemeralSequential(path string, data []byte, acl 
 		case ErrSessionExpired:
 			// No need to search for the node since it can't exist. Just try again.
 		case ErrConnectionClosed:
+
 			children, _, err := c.Children(rootPath)
 			if err != nil {
 				return "", err
