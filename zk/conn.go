@@ -11,6 +11,7 @@ Possible watcher events:
 import (
 	"crypto/rand"
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -21,6 +22,8 @@ import (
 	"sync/atomic"
 	"time"
 )
+
+var ErrNoServer = errors.New("zk: could not connect to a server")
 
 const (
 	bufferSize      = 1536 * 1024
@@ -181,6 +184,7 @@ func (c *Conn) connect() {
 
 		c.serverIndex = (c.serverIndex + 1) % len(c.servers)
 		if c.serverIndex == startIndex {
+			c.flushUnsentRequests(ErrNoServer)
 			time.Sleep(time.Second)
 		}
 	}
@@ -244,6 +248,17 @@ func (c *Conn) loop() {
 				return
 			case <-time.After(c.reconnectDelay):
 			}
+		}
+	}
+}
+
+func (c *Conn) flushUnsentRequests(err error) {
+	for {
+		select {
+		default:
+			return
+		case req := <-c.sendChan:
+			req.recvChan <- response{-1, err}
 		}
 	}
 }

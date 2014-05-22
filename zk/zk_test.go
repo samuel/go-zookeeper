@@ -371,3 +371,28 @@ func TestExpiringWatch(t *testing.T) {
 		t.Fatal("Child watcher timed out")
 	}
 }
+
+func TestRequestFail(t *testing.T) {
+	// If connecting fails to all servers in the list then pending requests
+	// should be errored out so they don't hang forever.
+
+	zk, _, err := Connect([]string{"127.0.0.1:32444"}, time.Second*15)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer zk.Close()
+
+	ch := make(chan error)
+	go func() {
+		_, _, err := zk.Get("/blah")
+		ch <- err
+	}()
+	select {
+	case err := <-ch:
+		if err == nil {
+			t.Fatal("Expected non-nil error on failed request due to connection failure")
+		}
+	case <-time.After(time.Second * 2):
+		t.Fatal("Get hung when connection could not be made")
+	}
+}
