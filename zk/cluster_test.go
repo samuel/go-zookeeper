@@ -2,6 +2,7 @@ package zk
 
 import (
 	"testing"
+	"time"
 )
 
 func TestBasicCluster(t *testing.T) {
@@ -53,5 +54,41 @@ func TestClientClusterFailover(t *testing.T) {
 		t.Fatalf("Get failed on node 2: %+v", err)
 	} else if string(by) != "foo-cluster" {
 		t.Fatal("Wrong data for node 2")
+	}
+}
+
+func TestWaitForClose(t *testing.T) {
+	ts, err := StartTestCluster(1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ts.Stop()
+	zk, err := ts.Connect(0)
+	if err != nil {
+		t.Fatalf("Connect returned error: %+v", err)
+	}
+	timeout := time.After(30*time.Second)
+CONNECTED:
+	for{
+		select{
+		case ev := <-zk.eventChan :
+			if ev.State == StateConnected {
+				break CONNECTED;
+			}
+		case <-timeout:
+			zk.Close()
+			t.Fatal("Timeout")
+		}
+	}
+	zk.Close()
+	for{
+		select{
+		case _,ok := <-zk.eventChan :
+			if !ok {
+				return
+			}
+		case <-timeout:
+			t.Fatal("Timeout")
+		}
 	}
 }
