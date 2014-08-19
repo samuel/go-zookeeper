@@ -26,7 +26,7 @@ import (
 var ErrNoServer = errors.New("zk: could not connect to a server")
 
 const (
-	bufferSize      = 1536 * 1024
+	bufferSize      = 10 * 1024 * 1024
 	eventChanSize   = 6
 	sendChanSize    = 16
 	protectedPrefix = "_c_"
