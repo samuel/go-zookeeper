@@ -142,6 +142,7 @@ func ConnectWithDialer(servers []string, recvTimeout time.Duration, dialer Diale
 		conn.loop()
 		conn.flushRequests(ErrClosing)
 		conn.invalidateWatches(ErrClosing)
+		close(conn.eventChan)
 	}()
 	return &conn, ec, nil
 }
