@@ -109,6 +109,9 @@ func Connect(servers []string, recvTimeout time.Duration) (*Conn, <-chan Event, 
 }
 
 func ConnectWithDialer(servers []string, recvTimeout time.Duration, dialer Dialer) (*Conn, <-chan Event, error) {
+	// Randomize the order of the servers to avoid creating hotspots
+	stringShuffle(servers)
+
 	for i, addr := range servers {
 		if !strings.Contains(addr, ":") {
 			servers[i] = addr + ":" + strconv.Itoa(DefaultPort)
