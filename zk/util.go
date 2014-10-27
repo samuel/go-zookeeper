@@ -4,6 +4,7 @@ import (
 	"crypto/sha1"
 	"encoding/base64"
 	"fmt"
+	"math/rand"
 )
 
 // AuthACL produces an ACL list containing a single ACL which uses the
@@ -28,4 +29,12 @@ func DigestACL(perms int32, user, password string) []ACL {
 	}
 	digest := base64.StdEncoding.EncodeToString(h.Sum(nil))
 	return []ACL{{perms, "digest", fmt.Sprintf("%s:%s", user, digest)}}
+}
+
+// stringShuffle performs a Fisher-Yates shuffle on a slice of strings
+func stringShuffle(s []string) {
+	for i := len(s) - 1; i > 0; i-- {
+		j := rand.Intn(i + 1)
+		s[i], s[j] = s[j], s[i]
+	}
 }
