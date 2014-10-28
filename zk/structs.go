@@ -5,6 +5,7 @@ import (
 	"errors"
 	"reflect"
 	"runtime"
+	"time"
 )
 
 var (
@@ -19,18 +20,95 @@ type ACL struct {
 	ID     string
 }
 
-type Stat struct {
-	Czxid          int64 // The zxid of the change that caused this znode to be created.
-	Mzxid          int64 // The zxid of the change that last modified this znode.
-	Ctime          int64 // The time in milliseconds from epoch when this znode was created.
-	Mtime          int64 // The time in milliseconds from epoch when this znode was last modified.
-	Version        int32 // The number of changes to the data of this znode.
-	Cversion       int32 // The number of changes to the children of this znode.
-	Aversion       int32 // The number of changes to the ACL of this znode.
-	EphemeralOwner int64 // The session id of the owner of this znode if the znode is an ephemeral node. If it is not an ephemeral node, it will be zero.
-	DataLength     int32 // The length of the data field of this znode.
-	NumChildren    int32 // The number of children of this znode.
-	Pzxid          int64 // last modified children
+type stat struct {
+	czxid          int64 // The zxid of the change that caused this znode to be created.
+	mzxid          int64 // The zxid of the change that last modified this znode.
+	ctime          int64 // The time in milliseconds from epoch when this znode was created.
+	mtime          int64 // The time in milliseconds from epoch when this znode was last modified.
+	version        int32 // The number of changes to the data of this znode.
+	cversion       int32 // The number of changes to the children of this znode.
+	aversion       int32 // The number of changes to the ACL of this znode.
+	ephemeralOwner int64 // The session id of the owner of this znode if the znode is an ephemeral node. If it is not an ephemeral node, it will be zero.
+	dataLength     int32 // The length of the data field of this znode.
+	numChildren    int32 // The number of children of this znode.
+	pzxid          int64 // last modified children
+}
+
+type Stat interface {
+	Czxid() int64
+	Mzxid() int64
+	CTime() time.Time
+	MTime() time.Time
+	Version() int
+	CVersion() int
+	AVersion() int
+	EphemeralOwner() int64
+	DataLength() int
+	NumChildren() int
+	Pzxid() int64
+}
+
+// Czxid returns the zxid of the change that caused the node to be created.
+func (s *stat) Czxid() int64 {
+	return s.czxid
+}
+
+// Mzxid returns the zxid of the change that last modified the node.
+func (s *stat) Mzxid() int64 {
+	return s.mzxid
+}
+
+func millisec2time(ms int64) time.Time {
+	return time.Unix(ms/1e3, ms%1e3*1e6)
+}
+
+// CTime returns the time (at millisecond resolution)  when the node was
+// created.
+func (s *stat) CTime() time.Time {
+	return millisec2time(s.ctime)
+}
+
+// MTime returns the time (at millisecond resolution) when the node was
+// last modified.
+func (s *stat) MTime() time.Time {
+	return millisec2time(int64(s.mtime))
+}
+
+// Version returns the number of changes to the data of the node.
+func (s *stat) Version() int {
+	return int(s.version)
+}
+
+// CVersion returns the number of changes to the children of the node.
+// This only changes when children are created or removed.
+func (s *stat) CVersion() int {
+	return int(s.cversion)
+}
+
+// AVersion returns the number of changes to the ACL of the node.
+func (s *stat) AVersion() int {
+	return int(s.aversion)
+}
+
+// If the node is an ephemeral node, EphemeralOwner returns the session id
+// of the owner of the node; otherwise it will return zero.
+func (s *stat) EphemeralOwner() int64 {
+	return int64(s.ephemeralOwner)
+}
+
+// DataLength returns the length of the data in the node in bytes.
+func (s *stat) DataLength() int {
+	return int(s.dataLength)
+}
+
+// NumChildren returns the number of children of the node.
+func (s *stat) NumChildren() int {
+	return int(s.numChildren)
+}
+
+// Pzxid returns the Pzxid of the node, whatever that is.
+func (s *stat) Pzxid() int64 {
+	return int64(s.pzxid)
 }
 
 type requestHeader struct {
