@@ -366,7 +366,14 @@ func (c *Conn) authenticate() error {
 	// package length
 	_, err = io.ReadFull(c.conn, buf[:4])
 	if err != nil {
-		return err
+		// Sometimes zookeeper just drops connection on invalid session data,
+		// we prefer to drop session and start from scratch when that event
+		// occurs instead of dropping into loop of connect/disconnect attempts
+		c.sessionID = 0
+		c.passwd = emptyPassword
+		c.lastZxid = 0
+		c.setState(StateExpired)
+		return ErrSessionExpired
 	}
 
 	blen := int(binary.BigEndian.Uint32(buf[:4]))
