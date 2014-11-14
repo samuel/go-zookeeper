@@ -76,6 +76,7 @@ func StartTestCluster(size int) (*TestCluster, error) {
 			ConfigPath: cfgPath,
 		}
 		if err := srv.Start(); err != nil {
+			fmt.Println(err)
 			return nil, err
 		}
 		cluster.Servers = append(cluster.Servers, TestServer{

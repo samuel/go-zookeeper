@@ -5,6 +5,7 @@ import (
 	"errors"
 	"reflect"
 	"runtime"
+	"time"
 )
 
 var (
@@ -19,18 +20,95 @@ type ACL struct {
 	ID     string
 }
 
-type Stat struct {
-	Czxid          int64 // The zxid of the change that caused this znode to be created.
-	Mzxid          int64 // The zxid of the change that last modified this znode.
-	Ctime          int64 // The time in milliseconds from epoch when this znode was created.
-	Mtime          int64 // The time in milliseconds from epoch when this znode was last modified.
-	Version        int32 // The number of changes to the data of this znode.
-	Cversion       int32 // The number of changes to the children of this znode.
-	Aversion       int32 // The number of changes to the ACL of this znode.
-	EphemeralOwner int64 // The session id of the owner of this znode if the znode is an ephemeral node. If it is not an ephemeral node, it will be zero.
-	DataLength     int32 // The length of the data field of this znode.
-	NumChildren    int32 // The number of children of this znode.
-	Pzxid          int64 // last modified children
+type zkstat struct {
+	ZCzxid          int64 // The zxid of the change that caused this znode to be created.
+	ZMzxid          int64 // The zxid of the change that last modified this znode.
+	ZCtime          int64 // The time in milliseconds from epoch when this znode was created.
+	ZMtime          int64 // The time in milliseconds from epoch when this znode was last modified.
+	ZVersion        int32 // The number of changes to the data of this znode.
+	ZCversion       int32 // The number of changes to the children of this znode.
+	ZAversion       int32 // The number of changes to the ACL of this znode.
+	ZEphemeralOwner int64 // The session id of the owner of this znode if the znode is an ephemeral node. If it is not an ephemeral node, it will be zero.
+	ZDataLength     int32 // The length of the data field of this znode.
+	ZNumChildren    int32 // The number of children of this znode.
+	ZPzxid          int64 // last modified children
+}
+
+type Stat interface {
+	Czxid() int64
+	Mzxid() int64
+	CTime() time.Time
+	MTime() time.Time
+	Version() int
+	CVersion() int
+	AVersion() int
+	EphemeralOwner() int64
+	DataLength() int
+	NumChildren() int
+	Pzxid() int64
+}
+
+// Czxid returns the zxid of the change that caused the node to be created.
+func (s *zkstat) Czxid() int64 {
+	return s.ZCzxid
+}
+
+// Mzxid returns the zxid of the change that last modified the node.
+func (s *zkstat) Mzxid() int64 {
+	return s.ZMzxid
+}
+
+func millisec2time(ms int64) time.Time {
+	return time.Unix(ms/1e3, ms%1e3*1e6)
+}
+
+// CTime returns the time (at millisecond resolution)  when the node was
+// created.
+func (s *zkstat) CTime() time.Time {
+	return millisec2time(s.ZCtime)
+}
+
+// MTime returns the time (at millisecond resolution) when the node was
+// last modified.
+func (s *zkstat) MTime() time.Time {
+	return millisec2time(int64(s.ZMtime))
+}
+
+// Version returns the number of changes to the data of the node.
+func (s *zkstat) Version() int {
+	return int(s.ZVersion)
+}
+
+// CVersion returns the number of changes to the children of the node.
+// This only changes when children are created or removed.
+func (s *zkstat) CVersion() int {
+	return int(s.ZCversion)
+}
+
+// AVersion returns the number of changes to the ACL of the node.
+func (s *zkstat) AVersion() int {
+	return int(s.ZAversion)
+}
+
+// If the node is an ephemeral node, EphemeralOwner returns the session id
+// of the owner of the node; otherwise it will return zero.
+func (s *zkstat) EphemeralOwner() int64 {
+	return int64(s.ZEphemeralOwner)
+}
+
+// DataLength returns the length of the data in the node in bytes.
+func (s *zkstat) DataLength() int {
+	return int(s.ZDataLength)
+}
+
+// NumChildren returns the number of children of the node.
+func (s *zkstat) NumChildren() int {
+	return int(s.ZNumChildren)
+}
+
+// Pzxid returns the Pzxid of the node, whatever that is.
+func (s *zkstat) Pzxid() int64 {
+	return int64(s.ZPzxid)
 }
 
 type requestHeader struct {
@@ -77,7 +155,7 @@ type pathResponse struct {
 }
 
 type statResponse struct {
-	Stat Stat
+	Stat zkstat
 }
 
 //
@@ -122,7 +200,7 @@ type getAclRequest pathRequest
 
 type getAclResponse struct {
 	Acl  []ACL
-	Stat Stat
+	Stat zkstat
 }
 
 type getChildrenRequest pathRequest
@@ -135,14 +213,14 @@ type getChildren2Request pathWatchRequest
 
 type getChildren2Response struct {
 	Children []string
-	Stat     Stat
+	Stat     zkstat
 }
 
 type getDataRequest pathWatchRequest
 
 type getDataResponse struct {
 	Data []byte
-	Stat Stat
+	Stat zkstat
 }
 
 type getMaxChildrenRequest pathRequest
@@ -213,7 +291,7 @@ type multiRequest struct {
 type multiResponseOp struct {
 	Header multiHeader
 	String string
-	Stat   *Stat
+	Stat   *zkstat
 }
 type multiResponse struct {
 	Ops        []multiResponseOp
@@ -294,7 +372,7 @@ func (r *multiResponse) Decode(buf []byte) (int, error) {
 		case opCreate:
 			w = reflect.ValueOf(&res.String)
 		case opSetData:
-			res.Stat = new(Stat)
+			res.Stat = new(zkstat)
 			w = reflect.ValueOf(res.Stat)
 		case opCheck, opDelete:
 		}

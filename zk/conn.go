@@ -26,7 +26,7 @@ import (
 var ErrNoServer = errors.New("zk: could not connect to a server")
 
 const (
-	bufferSize      = 1536 * 1024
+	bufferSize      = 10 * 1024 * 1024
 	eventChanSize   = 6
 	sendChanSize    = 16
 	protectedPrefix = "_c_"
@@ -605,13 +605,13 @@ func (c *Conn) AddAuth(scheme string, auth []byte) error {
 	return err
 }
 
-func (c *Conn) Children(path string) ([]string, *Stat, error) {
+func (c *Conn) Children(path string) ([]string, Stat, error) {
 	res := &getChildren2Response{}
 	_, err := c.request(opGetChildren2, &getChildren2Request{Path: path, Watch: false}, res, nil)
 	return res.Children, &res.Stat, err
 }
 
-func (c *Conn) ChildrenW(path string) ([]string, *Stat, <-chan Event, error) {
+func (c *Conn) ChildrenW(path string) ([]string, Stat, <-chan Event, error) {
 	var ech <-chan Event
 	res := &getChildren2Response{}
 	_, err := c.request(opGetChildren2, &getChildren2Request{Path: path, Watch: true}, res, func(req *request, res *responseHeader, err error) {
@@ -625,14 +625,14 @@ func (c *Conn) ChildrenW(path string) ([]string, *Stat, <-chan Event, error) {
 	return res.Children, &res.Stat, ech, err
 }
 
-func (c *Conn) Get(path string) ([]byte, *Stat, error) {
+func (c *Conn) Get(path string) ([]byte, Stat, error) {
 	res := &getDataResponse{}
 	_, err := c.request(opGetData, &getDataRequest{Path: path, Watch: false}, res, nil)
 	return res.Data, &res.Stat, err
 }
 
 // GetW returns the contents of a znode and sets a watch
-func (c *Conn) GetW(path string) ([]byte, *Stat, <-chan Event, error) {
+func (c *Conn) GetW(path string) ([]byte, Stat, <-chan Event, error) {
 	var ech <-chan Event
 	res := &getDataResponse{}
 	_, err := c.request(opGetData, &getDataRequest{Path: path, Watch: true}, res, func(req *request, res *responseHeader, err error) {
@@ -646,7 +646,7 @@ func (c *Conn) GetW(path string) ([]byte, *Stat, <-chan Event, error) {
 	return res.Data, &res.Stat, ech, err
 }
 
-func (c *Conn) Set(path string, data []byte, version int32) (*Stat, error) {
+func (c *Conn) Set(path string, data []byte, version int32) (Stat, error) {
 	res := &setDataResponse{}
 	_, err := c.request(opSetData, &SetDataRequest{path, data, version}, res, nil)
 	return &res.Stat, err
@@ -708,7 +708,7 @@ func (c *Conn) Delete(path string, version int32) error {
 	return err
 }
 
-func (c *Conn) Exists(path string) (bool, *Stat, error) {
+func (c *Conn) Exists(path string) (bool, Stat, error) {
 	res := &existsResponse{}
 	_, err := c.request(opExists, &existsRequest{Path: path, Watch: false}, res, nil)
 	exists := true
@@ -719,7 +719,7 @@ func (c *Conn) Exists(path string) (bool, *Stat, error) {
 	return exists, &res.Stat, err
 }
 
-func (c *Conn) ExistsW(path string) (bool, *Stat, <-chan Event, error) {
+func (c *Conn) ExistsW(path string) (bool, Stat, <-chan Event, error) {
 	var ech <-chan Event
 	res := &existsResponse{}
 	_, err := c.request(opExists, &existsRequest{Path: path, Watch: true}, res, func(req *request, res *responseHeader, err error) {
@@ -740,13 +740,13 @@ func (c *Conn) ExistsW(path string) (bool, *Stat, <-chan Event, error) {
 	return exists, &res.Stat, ech, err
 }
 
-func (c *Conn) GetACL(path string) ([]ACL, *Stat, error) {
+func (c *Conn) GetACL(path string) ([]ACL, Stat, error) {
 	res := &getAclResponse{}
 	_, err := c.request(opGetAcl, &getAclRequest{Path: path}, res, nil)
 	return res.Acl, &res.Stat, err
 }
 
-func (c *Conn) SetACL(path string, acl []ACL, version int32) (*Stat, error) {
+func (c *Conn) SetACL(path string, acl []ACL, version int32) (Stat, error) {
 	res := &setAclResponse{}
 	_, err := c.request(opSetAcl, &setAclRequest{Path: path, Acl: acl, Version: version}, res, nil)
 	return &res.Stat, err

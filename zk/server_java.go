@@ -126,7 +126,14 @@ func (srv *Server) Start() error {
 	srv.cmd = exec.Command("java", "-jar", srv.JarPath, "server", srv.ConfigPath)
 	// srv.cmd.Stdout = os.Stdout
 	// srv.cmd.Stderr = os.Stderr
-	return srv.cmd.Start()
+	err := srv.cmd.Start()
+	if err != nil {
+		fmt.Println("start failed", err)
+	}
+
+	fmt.Println("start zookeeper ok")
+
+	return err
 }
 
 func (srv *Server) Stop() error {
