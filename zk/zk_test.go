@@ -3,6 +3,7 @@ package zk
 import (
 	"fmt"
 	"io"
+	"log"
 	"net"
 	"strings"
 	"testing"
@@ -415,11 +416,9 @@ func TestSlowServer(t *testing.T) {
 		throttle.Rate{}, throttle.Rate{},
 		realAddr, func(ln *throttle.Listener) {
 			if ln.Up.Latency == 0 {
-				t.Log("Throttling next connection")
 				ln.Up.Latency = time.Millisecond * 2000
 				ln.Down.Latency = time.Millisecond * 2000
 			} else {
-				t.Log("Not throttling next connection")
 				ln.Up.Latency = 0
 				ln.Down.Latency = 0
 			}
@@ -449,10 +448,7 @@ func TestSlowServer(t *testing.T) {
 		t.Fatal("Delete should have failed")
 	}
 
-	// Force a reconnect to get a non-throttled connection
-	zk.conn.Close()
-
-	time.Sleep(time.Millisecond * 100)
+	// The previous request should have timed out causing the server to be disconnected and reconnected
 
 	if _, err := zk.Create("/gozk-test", []byte{1, 2, 3, 4}, 0, WorldACL(PermAll)); err != nil {
 		t.Fatal(err)
@@ -495,27 +491,28 @@ func startSlowProxy(t *testing.T, up, down throttle.Rate, upstream string, adj f
 				adj(tln)
 			}
 			go func(cn net.Conn) {
+				defer cn.Close()
+				upcn, err := net.Dial("tcp", upstream)
+				if err != nil {
+					log.Print(err)
+					return
+				}
 				// This will leave hanging goroutines util stopCh is closed
 				// but it doesn't matter in the context of running tests.
 				go func() {
 					<-stopCh
-					cn.Close()
+					upcn.Close()
 				}()
-				upcn, err := net.Dial("tcp", upstream)
-				if err != nil {
-					t.Fatal(err)
-					return
-				}
 				go func() {
 					if _, err := io.Copy(upcn, cn); err != nil {
 						if !strings.Contains(err.Error(), "use of closed network connection") {
-							t.Logf("Upstream write failed: %s", err.Error())
+							// log.Printf("Upstream write failed: %s", err.Error())
 						}
 					}
 				}()
 				if _, err := io.Copy(cn, upcn); err != nil {
 					if !strings.Contains(err.Error(), "use of closed network connection") {
-						t.Logf("Upstream read failed: %s", err.Error())
+						// log.Printf("Upstream read failed: %s", err.Error())
 					}
 				}
 			}(cn)
