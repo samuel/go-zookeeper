@@ -5,8 +5,18 @@ import (
 	"time"
 )
 
+type logWriter struct {
+	t *testing.T
+	p string
+}
+
+func (lw logWriter) Write(b []byte) (int, error) {
+	lw.t.Logf("%s%s", lw.p, string(b))
+	return len(b), nil
+}
+
 func TestBasicCluster(t *testing.T) {
-	ts, err := StartTestCluster(3)
+	ts, err := StartTestCluster(3, nil, logWriter{t: t, p: "[ZKERR] "})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -22,6 +32,8 @@ func TestBasicCluster(t *testing.T) {
 	}
 	defer zk2.Close()
 
+	time.Sleep(time.Second * 5)
+
 	if _, err := zk1.Create("/gozk-test", []byte("foo-cluster"), 0, WorldACL(PermAll)); err != nil {
 		t.Fatalf("Create failed on node 1: %+v", err)
 	}
@@ -33,7 +45,7 @@ func TestBasicCluster(t *testing.T) {
 }
 
 func TestClientClusterFailover(t *testing.T) {
-	ts, err := StartTestCluster(3)
+	ts, err := StartTestCluster(3, nil, logWriter{t: t, p: "[ZKERR] "})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -58,7 +70,7 @@ func TestClientClusterFailover(t *testing.T) {
 }
 
 func TestWaitForClose(t *testing.T) {
-	ts, err := StartTestCluster(1)
+	ts, err := StartTestCluster(1, nil, logWriter{t: t, p: "[ZKERR] "})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -67,13 +79,13 @@ func TestWaitForClose(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Connect returned error: %+v", err)
 	}
-	timeout := time.After(30*time.Second)
+	timeout := time.After(30 * time.Second)
 CONNECTED:
-	for{
-		select{
-		case ev := <-zk.eventChan :
+	for {
+		select {
+		case ev := <-zk.eventChan:
 			if ev.State == StateConnected {
-				break CONNECTED;
+				break CONNECTED
 			}
 		case <-timeout:
 			zk.Close()
@@ -81,9 +93,9 @@ CONNECTED:
 		}
 	}
 	zk.Close()
-	for{
-		select{
-		case _,ok := <-zk.eventChan :
+	for {
+		select {
+		case _, ok := <-zk.eventChan:
 			if !ok {
 				return
 			}

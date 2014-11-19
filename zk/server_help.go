@@ -2,6 +2,7 @@ package zk
 
 import (
 	"fmt"
+	"io"
 	"io/ioutil"
 	"math/rand"
 	"os"
@@ -20,7 +21,7 @@ type TestCluster struct {
 	Servers []TestServer
 }
 
-func StartTestCluster(size int) (*TestCluster, error) {
+func StartTestCluster(size int, stdout, stderr io.Writer) (*TestCluster, error) {
 	tmpPath, err := ioutil.TempDir("", "gozk")
 	if err != nil {
 		return nil, err
@@ -74,6 +75,8 @@ func StartTestCluster(size int) (*TestCluster, error) {
 
 		srv := &Server{
 			ConfigPath: cfgPath,
+			Stdout:     stdout,
+			Stderr:     stderr,
 		}
 		if err := srv.Start(); err != nil {
 			return nil, err

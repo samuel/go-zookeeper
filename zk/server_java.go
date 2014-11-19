@@ -110,8 +110,9 @@ func findZookeeperFatJar() string {
 }
 
 type Server struct {
-	JarPath    string
-	ConfigPath string
+	JarPath        string
+	ConfigPath     string
+	Stdout, Stderr io.Writer
 
 	cmd *exec.Cmd
 }
@@ -124,8 +125,8 @@ func (srv *Server) Start() error {
 		}
 	}
 	srv.cmd = exec.Command("java", "-jar", srv.JarPath, "server", srv.ConfigPath)
-	// srv.cmd.Stdout = os.Stdout
-	// srv.cmd.Stderr = os.Stderr
+	srv.cmd.Stdout = srv.Stdout
+	srv.cmd.Stderr = srv.Stderr
 	return srv.cmd.Start()
 }
 

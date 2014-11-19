@@ -1,12 +1,18 @@
 package zk
 
 import (
+	"fmt"
+	"io"
+	"net"
+	"strings"
 	"testing"
 	"time"
+
+	"camlistore.org/pkg/throttle"
 )
 
 func TestCreate(t *testing.T) {
-	ts, err := StartTestCluster(1)
+	ts, err := StartTestCluster(1, nil, logWriter{t: t, p: "[ZKERR] "})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -37,7 +43,7 @@ func TestCreate(t *testing.T) {
 }
 
 func TestMulti(t *testing.T) {
-	ts, err := StartTestCluster(1)
+	ts, err := StartTestCluster(1, nil, logWriter{t: t, p: "[ZKERR] "})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -77,7 +83,7 @@ func TestMulti(t *testing.T) {
 }
 
 func TestGetSetACL(t *testing.T) {
-	ts, err := StartTestCluster(1)
+	ts, err := StartTestCluster(1, nil, logWriter{t: t, p: "[ZKERR] "})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -131,7 +137,7 @@ func TestGetSetACL(t *testing.T) {
 }
 
 func TestAuth(t *testing.T) {
-	ts, err := StartTestCluster(1)
+	ts, err := StartTestCluster(1, nil, logWriter{t: t, p: "[ZKERR] "})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -181,7 +187,7 @@ func TestAuth(t *testing.T) {
 }
 
 func TestChildWatch(t *testing.T) {
-	ts, err := StartTestCluster(1)
+	ts, err := StartTestCluster(1, nil, logWriter{t: t, p: "[ZKERR] "})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -252,7 +258,7 @@ func TestChildWatch(t *testing.T) {
 }
 
 func TestSetWatchers(t *testing.T) {
-	ts, err := StartTestCluster(1)
+	ts, err := StartTestCluster(1, nil, logWriter{t: t, p: "[ZKERR] "})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -332,7 +338,7 @@ func TestSetWatchers(t *testing.T) {
 }
 
 func TestExpiringWatch(t *testing.T) {
-	ts, err := StartTestCluster(1)
+	ts, err := StartTestCluster(1, nil, logWriter{t: t, p: "[ZKERR] "})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -395,4 +401,125 @@ func TestRequestFail(t *testing.T) {
 	case <-time.After(time.Second * 2):
 		t.Fatal("Get hung when connection could not be made")
 	}
+}
+
+func TestSlowServer(t *testing.T) {
+	ts, err := StartTestCluster(1, nil, logWriter{t: t, p: "[ZKERR] "})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ts.Stop()
+
+	realAddr := fmt.Sprintf("127.0.0.1:%d", ts.Servers[0].Port)
+	proxyAddr, stopCh, err := startSlowProxy(t,
+		throttle.Rate{}, throttle.Rate{},
+		realAddr, func(ln *throttle.Listener) {
+			if ln.Up.Latency == 0 {
+				t.Log("Throttling next connection")
+				ln.Up.Latency = time.Millisecond * 2000
+				ln.Down.Latency = time.Millisecond * 2000
+			} else {
+				t.Log("Not throttling next connection")
+				ln.Up.Latency = 0
+				ln.Down.Latency = 0
+			}
+		})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer close(stopCh)
+
+	zk, _, err := Connect([]string{proxyAddr}, time.Millisecond*500)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer zk.Close()
+
+	_, _, wch, err := zk.ChildrenW("/")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Force a reconnect to get a throttled connection
+	zk.conn.Close()
+
+	time.Sleep(time.Millisecond * 100)
+
+	if err := zk.Delete("/gozk-test", -1); err == nil {
+		t.Fatal("Delete should have failed")
+	}
+
+	// Force a reconnect to get a non-throttled connection
+	zk.conn.Close()
+
+	time.Sleep(time.Millisecond * 100)
+
+	if _, err := zk.Create("/gozk-test", []byte{1, 2, 3, 4}, 0, WorldACL(PermAll)); err != nil {
+		t.Fatal(err)
+	}
+
+	// Make sure event is still returned because the session should not have been affected
+	select {
+	case ev := <-wch:
+		t.Logf("Received event: %+v", ev)
+	case <-time.After(time.Second):
+		t.Fatal("Expected to receive a watch event")
+	}
+}
+
+func startSlowProxy(t *testing.T, up, down throttle.Rate, upstream string, adj func(ln *throttle.Listener)) (string, chan bool, error) {
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		return "", nil, err
+	}
+	tln := &throttle.Listener{
+		Listener: ln,
+		Up:       up,
+		Down:     down,
+	}
+	stopCh := make(chan bool)
+	go func() {
+		<-stopCh
+		tln.Close()
+	}()
+	go func() {
+		for {
+			cn, err := tln.Accept()
+			if err != nil {
+				if !strings.Contains(err.Error(), "use of closed network connection") {
+					t.Fatalf("Accept failed: %s", err.Error())
+				}
+				return
+			}
+			if adj != nil {
+				adj(tln)
+			}
+			go func(cn net.Conn) {
+				// This will leave hanging goroutines util stopCh is closed
+				// but it doesn't matter in the context of running tests.
+				go func() {
+					<-stopCh
+					cn.Close()
+				}()
+				upcn, err := net.Dial("tcp", upstream)
+				if err != nil {
+					t.Fatal(err)
+					return
+				}
+				go func() {
+					if _, err := io.Copy(upcn, cn); err != nil {
+						if !strings.Contains(err.Error(), "use of closed network connection") {
+							t.Logf("Upstream write failed: %s", err.Error())
+						}
+					}
+				}()
+				if _, err := io.Copy(cn, upcn); err != nil {
+					if !strings.Contains(err.Error(), "use of closed network connection") {
+						t.Logf("Upstream read failed: %s", err.Error())
+					}
+				}
+			}(cn)
+		}
+	}()
+	return ln.Addr().String(), stopCh, nil
 }
