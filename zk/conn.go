@@ -52,7 +52,7 @@ type Conn struct {
 	sessionID int64
 	state     State // must be 32-bit aligned
 	xid       int32
-	timeout   int32 // session timeout in seconds
+	timeout   int32 // session timeout in milliseconds
 	passwd    []byte
 
 	dialer         Dialer
@@ -104,13 +104,15 @@ type Event struct {
 	Err   error
 }
 
-func Connect(servers []string, recvTimeout time.Duration) (*Conn, <-chan Event, error) {
-	return ConnectWithDialer(servers, recvTimeout, nil)
+func Connect(servers []string, sessionTimeout time.Duration) (*Conn, <-chan Event, error) {
+	return ConnectWithDialer(servers, sessionTimeout, nil)
 }
 
-func ConnectWithDialer(servers []string, recvTimeout time.Duration, dialer Dialer) (*Conn, <-chan Event, error) {
+func ConnectWithDialer(servers []string, sessionTimeout time.Duration, dialer Dialer) (*Conn, <-chan Event, error) {
 	// Randomize the order of the servers to avoid creating hotspots
 	stringShuffle(servers)
+
+	recvTimeout := sessionTimeout * 2 / 3
 
 	for i, addr := range servers {
 		if !strings.Contains(addr, ":") {
@@ -136,7 +138,7 @@ func ConnectWithDialer(servers []string, recvTimeout time.Duration, dialer Diale
 		requests:       make(map[int32]*request),
 		watchers:       make(map[watchPathType][]chan Event),
 		passwd:         emptyPassword,
-		timeout:        30000,
+		timeout:        int32(sessionTimeout.Nanoseconds() / 1e6),
 
 		// Debug
 		reconnectDelay: 0,
