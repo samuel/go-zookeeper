@@ -104,10 +104,19 @@ type Event struct {
 	Err   error
 }
 
+// Connect establishes a new connection to a pool of zookeeper servers
+// using the default net.Dialer. See ConnectWithDialer for further
+// information about session timeout.
 func Connect(servers []string, sessionTimeout time.Duration) (*Conn, <-chan Event, error) {
 	return ConnectWithDialer(servers, sessionTimeout, nil)
 }
 
+// ConnectWithDialer establishes a new connection to a pool of zookeeper
+// servers. The provided session timeout sets the amount of time for which
+// a session is considered valid after losing connection to a server. Within
+// the session timeout it's possible to reestablish a connection to a different
+// server and keep the same session. This is means any ephemeral nodes and
+// watches are maintained.
 func ConnectWithDialer(servers []string, sessionTimeout time.Duration, dialer Dialer) (*Conn, <-chan Event, error) {
 	// Randomize the order of the servers to avoid creating hotspots
 	stringShuffle(servers)
