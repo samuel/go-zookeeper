@@ -769,31 +769,40 @@ func (c *Conn) Sync(path string) (string, error) {
 	return res.Path, err
 }
 
-type MultiOps struct {
-	Create  []CreateRequest
-	Delete  []DeleteRequest
-	SetData []SetDataRequest
-	Check   []CheckVersionRequest
+type MultiResponse struct {
+	Stat   *Stat
+	String string
 }
 
-func (c *Conn) Multi(ops MultiOps) error {
+// Multi executes multiple ZooKeeper operations or none of them. The provided
+// ops must be one of *CreateRequest, *DeleteRequest, *SetDataRequest, or
+// *CheckVersionRequest.
+func (c *Conn) Multi(ops ...interface{}) ([]MultiResponse, error) {
 	req := &multiRequest{
-		Ops:        make([]multiRequestOp, 0, len(ops.Create)+len(ops.Delete)+len(ops.SetData)+len(ops.Check)),
+		Ops:        make([]multiRequestOp, 0, len(ops)),
 		DoneHeader: multiHeader{Type: -1, Done: true, Err: -1},
 	}
-	for _, r := range ops.Create {
-		req.Ops = append(req.Ops, multiRequestOp{multiHeader{opCreate, false, -1}, r})
-	}
-	for _, r := range ops.SetData {
-		req.Ops = append(req.Ops, multiRequestOp{multiHeader{opSetData, false, -1}, r})
-	}
-	for _, r := range ops.Delete {
-		req.Ops = append(req.Ops, multiRequestOp{multiHeader{opDelete, false, -1}, r})
-	}
-	for _, r := range ops.Check {
-		req.Ops = append(req.Ops, multiRequestOp{multiHeader{opCheck, false, -1}, r})
+	for _, op := range ops {
+		var opCode int32
+		switch op.(type) {
+		case *CreateRequest:
+			opCode = opCreate
+		case *SetDataRequest:
+			opCode = opSetData
+		case *DeleteRequest:
+			opCode = opDelete
+		case *CheckVersionRequest:
+			opCode = opCheck
+		default:
+			return nil, fmt.Errorf("uknown operation type %T", op)
+		}
+		req.Ops = append(req.Ops, multiRequestOp{multiHeader{opCode, false, -1}, op})
 	}
 	res := &multiResponse{}
 	_, err := c.request(opMulti, req, res, nil)
-	return err
+	mr := make([]MultiResponse, len(res.Ops))
+	for i, op := range res.Ops {
+		mr[i] = MultiResponse{Stat: op.Stat, String: op.String}
+	}
+	return mr, err
 }

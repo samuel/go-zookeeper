@@ -64,7 +64,6 @@ func trace(conn1, conn2 net.Conn, client bool) {
 					found := false
 					opcode, found = requests[xid]
 					if !found {
-						println("WEFWEFEW")
 						opcode = 0
 					}
 					delete(requests, xid)

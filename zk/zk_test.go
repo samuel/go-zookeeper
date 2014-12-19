@@ -60,19 +60,16 @@ func TestMulti(t *testing.T) {
 	if err := zk.Delete(path, -1); err != nil && err != ErrNoNode {
 		t.Fatalf("Delete returned error: %+v", err)
 	}
-	ops := MultiOps{
-		Create: []CreateRequest{
-			{Path: path, Data: []byte{1, 2, 3, 4}, Acl: WorldACL(PermAll)},
-		},
-		SetData: []SetDataRequest{
-			{Path: path, Data: []byte{1, 2, 3, 4}, Version: -1},
-		},
-		// Delete: []DeleteRequest{
-		// 	{Path: path, Version: -1},
-		// },
+	ops := []interface{}{
+		&CreateRequest{Path: path, Data: []byte{1, 2, 3, 4}, Acl: WorldACL(PermAll)},
+		&SetDataRequest{Path: path, Data: []byte{1, 2, 3, 4}, Version: -1},
 	}
-	if err := zk.Multi(ops); err != nil {
+	if res, err := zk.Multi(ops...); err != nil {
 		t.Fatalf("Multi returned error: %+v", err)
+	} else if len(res) != 2 {
+		t.Fatalf("Expected 2 responses got %d", len(res))
+	} else {
+		t.Logf("%+v", res)
 	}
 	if data, stat, err := zk.Get(path); err != nil {
 		t.Fatalf("Get returned error: %+v", err)
