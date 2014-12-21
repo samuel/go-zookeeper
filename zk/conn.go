@@ -255,6 +255,7 @@ func (c *Conn) loop() {
 		if err != ErrSessionExpired {
 			err = ErrConnectionClosed
 		}
+		c.flushUnsentRequests(err)
 		c.flushRequests(err)
 
 		if c.reconnectDelay > 0 {
@@ -375,6 +376,7 @@ func (c *Conn) authenticate() error {
 	// connect response
 
 	// package length
+	c.conn.SetReadDeadline(time.Now().Add(c.recvTimeout))
 	_, err = io.ReadFull(c.conn, buf[:4])
 	if err != nil {
 		return err
@@ -389,6 +391,7 @@ func (c *Conn) authenticate() error {
 	if err != nil {
 		return err
 	}
+	c.conn.SetReadDeadline(time.Now().Add(c.recvTimeout))
 
 	r := connectResponse{}
 	_, err = decodePacket(buf[:blen], &r)
