@@ -208,14 +208,14 @@ func (c *Conn) connect() error {
 			return nil
 		}
 
+		log.Printf("Failed to connect to %s: %+v", c.servers[c.serverIndex], err)
+
 		if c.retry != -1 && retryAttemptCount >= c.retry {
 			c.conn = nil
 			c.setState(StateDisconnected)
 			c.flushUnsentRequests(ErrNoServer)
 			return err
 		}
-
-		log.Printf("Failed to connect to %s: %+v", c.servers[c.serverIndex], err)
 
 		c.serverIndex = (c.serverIndex + 1) % len(c.servers)
 		if c.serverIndex == startIndex {
