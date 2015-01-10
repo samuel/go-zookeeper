@@ -213,17 +213,15 @@ func (c *Conn) connect() error {
 		if c.retry != -1 && retryAttemptCount >= c.retry {
 			c.conn = nil
 			c.setState(StateDisconnected)
-			c.flushUnsentRequests(ErrNoServer)
 			return err
 		}
+		retryAttemptCount++
 
 		c.serverIndex = (c.serverIndex + 1) % len(c.servers)
 		if c.serverIndex == startIndex {
 			c.flushUnsentRequests(ErrNoServer)
 			time.Sleep(time.Second)
 		}
-
-		retryAttemptCount++
 	}
 }
 
