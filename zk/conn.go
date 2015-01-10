@@ -54,6 +54,7 @@ type Conn struct {
 	xid       int32
 	timeout   int32 // session timeout in milliseconds
 	passwd    []byte
+	retry     int
 
 	dialer         Dialer
 	servers        []string
@@ -104,11 +105,19 @@ type Event struct {
 	Err   error
 }
 
-// Connect establishes a new connection to a pool of zookeeper servers
+// Connect establishes a new connection to a pool of zookeeper
+// servers with an infinite number of retries
 // using the default net.Dialer. See ConnectWithDialer for further
 // information about session timeout.
 func Connect(servers []string, sessionTimeout time.Duration) (*Conn, <-chan Event, error) {
-	return ConnectWithDialer(servers, sessionTimeout, nil)
+	return ConnectWithRetryAttempt(servers, sessionTimeout, -1)
+}
+
+// Connect establishes a new connection to a pool of zookeeper servers
+// using the default net.Dialer. See ConnectWithDialer for further
+// information about session timeout.
+func ConnectWithRetryAttempt(servers []string, sessionTimeout time.Duration, retryAttempt int) (*Conn, <-chan Event, error) {
+	return ConnectWithDialer(servers, sessionTimeout, retryAttempt, nil)
 }
 
 // ConnectWithDialer establishes a new connection to a pool of zookeeper
@@ -117,7 +126,7 @@ func Connect(servers []string, sessionTimeout time.Duration) (*Conn, <-chan Even
 // the session timeout it's possible to reestablish a connection to a different
 // server and keep the same session. This is means any ephemeral nodes and
 // watches are maintained.
-func ConnectWithDialer(servers []string, sessionTimeout time.Duration, dialer Dialer) (*Conn, <-chan Event, error) {
+func ConnectWithDialer(servers []string, sessionTimeout time.Duration, retryAttempt int, dialer Dialer) (*Conn, <-chan Event, error) {
 	// Randomize the order of the servers to avoid creating hotspots
 	stringShuffle(servers)
 
@@ -148,6 +157,7 @@ func ConnectWithDialer(servers []string, sessionTimeout time.Duration, dialer Di
 		watchers:       make(map[watchPathType][]chan Event),
 		passwd:         emptyPassword,
 		timeout:        int32(sessionTimeout.Nanoseconds() / 1e6),
+		retry:          retryAttempt,
 
 		// Debug
 		reconnectDelay: 0,
@@ -183,16 +193,26 @@ func (c *Conn) setState(state State) {
 	}
 }
 
-func (c *Conn) connect() {
+func (c *Conn) connect() error {
 	c.serverIndex = (c.serverIndex + 1) % len(c.servers)
 	startIndex := c.serverIndex
 	c.setState(StateConnecting)
+
+	retryAttemptCount := 0
+
 	for {
 		zkConn, err := c.dialer("tcp", c.servers[c.serverIndex], c.connectTimeout)
 		if err == nil {
 			c.conn = zkConn
 			c.setState(StateConnected)
-			return
+			return nil
+		}
+
+		if c.retry != -1 && retryAttemptCount >= c.retry {
+			c.conn = nil
+			c.setState(StateDisconnected)
+			c.flushUnsentRequests(ErrNoServer)
+			return err
 		}
 
 		log.Printf("Failed to connect to %s: %+v", c.servers[c.serverIndex], err)
@@ -202,13 +222,19 @@ func (c *Conn) connect() {
 			c.flushUnsentRequests(ErrNoServer)
 			time.Sleep(time.Second)
 		}
+
+		retryAttemptCount++
 	}
 }
 
 func (c *Conn) loop() {
 	for {
-		c.connect()
-		err := c.authenticate()
+		err := c.connect()
+		if err != nil {
+			return
+		}
+
+		err = c.authenticate()
 		switch {
 		case err == ErrSessionExpired:
 			c.invalidateWatches(err)
