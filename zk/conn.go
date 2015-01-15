@@ -365,7 +365,9 @@ func (c *Conn) authenticate() error {
 
 	binary.BigEndian.PutUint32(buf[:4], uint32(n))
 
+	c.conn.SetWriteDeadline(time.Now().Add(c.recvTimeout * 10))
 	_, err = c.conn.Write(buf[:n+4])
+	c.conn.SetWriteDeadline(time.Time{})
 	if err != nil {
 		return err
 	}
@@ -375,7 +377,9 @@ func (c *Conn) authenticate() error {
 	// connect response
 
 	// package length
+	c.conn.SetReadDeadline(time.Now().Add(c.recvTimeout * 10))
 	_, err = io.ReadFull(c.conn, buf[:4])
+	c.conn.SetReadDeadline(time.Time{})
 	if err != nil {
 		return err
 	}
