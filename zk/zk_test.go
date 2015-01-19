@@ -3,7 +3,6 @@ package zk
 import (
 	"fmt"
 	"io"
-	"log"
 	"net"
 	"strings"
 	"testing"
@@ -491,7 +490,7 @@ func startSlowProxy(t *testing.T, up, down throttle.Rate, upstream string, adj f
 				defer cn.Close()
 				upcn, err := net.Dial("tcp", upstream)
 				if err != nil {
-					log.Print(err)
+					t.Log(err)
 					return
 				}
 				// This will leave hanging goroutines util stopCh is closed
