@@ -15,6 +15,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"math"
 	"net"
 	"strconv"
 	"strings"
@@ -584,7 +585,19 @@ func (c *Conn) recvLoop(conn net.Conn) error {
 }
 
 func (c *Conn) nextXid() int32 {
-	return atomic.AddInt32(&c.xid, 1)
+	var xid int32
+	for {
+		xid = atomic.LoadInt32(&c.xid)
+		if xid >= math.MaxInt32-2 {
+			if atomic.CompareAndSwapInt32(&c.xid, xid, 0) {
+				return 0
+			}
+		} else {
+			if atomic.CompareAndSwapInt32(&c.xid, xid, xid+1) {
+				return xid + 1
+			}
+		}
+	}
 }
 
 func (c *Conn) addWatcher(path string, watchType watchType) <-chan Event {
