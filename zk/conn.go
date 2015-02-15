@@ -139,7 +139,7 @@ func ConnectWithDialer(servers []string, recvTimeout time.Duration, dialer Diale
 		timeout:        30000,
 
 		// Debug
-		reconnectDelay: 0,
+		reconnectDelay: time.Second,
 	}
 	go func() {
 		conn.loop()
