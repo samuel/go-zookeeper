@@ -118,6 +118,10 @@ func Connect(servers []string, sessionTimeout time.Duration) (*Conn, <-chan Even
 // server and keep the same session. This is means any ephemeral nodes and
 // watches are maintained.
 func ConnectWithDialer(servers []string, sessionTimeout time.Duration, dialer Dialer) (*Conn, <-chan Event, error) {
+	if len(servers) == 0 {
+		return nil, nil, errors.New("zk: server list must not be empty")
+	}
+
 	// Randomize the order of the servers to avoid creating hotspots
 	stringShuffle(servers)
 
