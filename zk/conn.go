@@ -60,7 +60,7 @@ type Conn struct {
 	serverIndex    int
 	conn           net.Conn
 	eventChan      chan Event
-	shouldQuit     chan bool
+	shouldQuit     chan struct{}
 	pingInterval   time.Duration
 	recvTimeout    time.Duration
 	connectTimeout time.Duration
@@ -143,7 +143,7 @@ func ConnectWithDialer(servers []string, sessionTimeout time.Duration, dialer Di
 		conn:           nil,
 		state:          StateDisconnected,
 		eventChan:      ec,
-		shouldQuit:     make(chan bool),
+		shouldQuit:     make(chan struct{}),
 		recvTimeout:    recvTimeout,
 		pingInterval:   recvTimeout / 2,
 		connectTimeout: 1 * time.Second,
@@ -187,7 +187,7 @@ func (c *Conn) setState(state State) {
 	}
 }
 
-func (c *Conn) connect() {
+func (c *Conn) connect() error {
 	c.serverIndex = (c.serverIndex + 1) % len(c.servers)
 	startIndex := c.serverIndex
 	c.setState(StateConnecting)
@@ -196,7 +196,7 @@ func (c *Conn) connect() {
 		if err == nil {
 			c.conn = zkConn
 			c.setState(StateConnected)
-			return
+			return nil
 		}
 
 		log.Printf("Failed to connect to %s: %+v", c.servers[c.serverIndex], err)
@@ -204,14 +204,26 @@ func (c *Conn) connect() {
 		c.serverIndex = (c.serverIndex + 1) % len(c.servers)
 		if c.serverIndex == startIndex {
 			c.flushUnsentRequests(ErrNoServer)
-			time.Sleep(time.Second)
+
+			select {
+			case <-time.After(time.Second):
+				// pass
+			case <-c.shouldQuit:
+				c.setState(StateDisconnected)
+				c.flushUnsentRequests(ErrClosing)
+				return ErrClosing
+			}
 		}
 	}
 }
 
 func (c *Conn) loop() {
 	for {
-		c.connect()
+		if err := c.connect(); err != nil {
+			// c.Close() was called
+			return
+		}
+
 		err := c.authenticate()
 		switch {
 		case err == ErrSessionExpired:
@@ -219,7 +231,7 @@ func (c *Conn) loop() {
 		case err != nil && c.conn != nil:
 			c.conn.Close()
 		case err == nil:
-			closeChan := make(chan bool) // channel to tell send loop stop
+			closeChan := make(chan struct{}) // channel to tell send loop stop
 			var wg sync.WaitGroup
 
 			wg.Add(1)
@@ -422,7 +434,7 @@ func (c *Conn) authenticate() error {
 	return nil
 }
 
-func (c *Conn) sendLoop(conn net.Conn, closeChan <-chan bool) error {
+func (c *Conn) sendLoop(conn net.Conn, closeChan <-chan struct{}) error {
 	pingTicker := time.NewTicker(c.pingInterval)
 	defer pingTicker.Stop()
 
