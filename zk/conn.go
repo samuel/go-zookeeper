@@ -98,10 +98,11 @@ type response struct {
 }
 
 type Event struct {
-	Type  EventType
-	State State
-	Path  string // For non-session events, the path of the watched node.
-	Err   error
+	Type   EventType
+	State  State
+	Path   string // For non-session events, the path of the watched node.
+	Err    error
+	Server string // For connection events
 }
 
 // Connect establishes a new connection to a pool of zookeeper servers
@@ -181,7 +182,7 @@ func (c *Conn) State() State {
 func (c *Conn) setState(state State) {
 	atomic.StoreInt32((*int32)(&c.state), int32(state))
 	select {
-	case c.eventChan <- Event{Type: EventSession, State: state}:
+	case c.eventChan <- Event{Type: EventSession, State: state, Server: c.servers[c.serverIndex]}:
 	default:
 		// panic("zk: event channel full - it must be monitored and never allowed to be full")
 	}

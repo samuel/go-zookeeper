@@ -1,6 +1,8 @@
 package zk
 
 import (
+	"fmt"
+	"strings"
 	"testing"
 	"time"
 )
@@ -50,18 +52,52 @@ func TestClientClusterFailover(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer ts.Stop()
-	zk, err := ts.ConnectAll()
+	zk, evCh, err := ts.ConnectAll()
 	if err != nil {
 		t.Fatalf("Connect returned error: %+v", err)
 	}
 	defer zk.Close()
 
+	hasSession := make(chan string, 1)
+	go func() {
+		for ev := range evCh {
+			if ev.Type == EventSession && ev.State == StateHasSession {
+				select {
+				case hasSession <- ev.Server:
+				default:
+				}
+			}
+		}
+	}()
+
+	waitSession := func() string {
+		select {
+		case srv := <-hasSession:
+			return srv
+		case <-time.After(time.Second * 8):
+			t.Fatal("Failed to connect and get a session")
+		}
+		return ""
+	}
+
+	srv := waitSession()
 	if _, err := zk.Create("/gozk-test", []byte("foo-cluster"), 0, WorldACL(PermAll)); err != nil {
 		t.Fatalf("Create failed on node 1: %+v", err)
 	}
 
-	ts.Servers[0].Srv.Stop()
+	stopped := false
+	for _, s := range ts.Servers {
+		if strings.HasSuffix(srv, fmt.Sprintf(":%d", s.Port)) {
+			s.Srv.Stop()
+			stopped = true
+			break
+		}
+	}
+	if !stopped {
+		t.Fatal("Failed to stop server")
+	}
 
+	waitSession()
 	if by, _, err := zk.Get("/gozk-test"); err != nil {
 		t.Fatalf("Get failed on node 2: %+v", err)
 	} else if string(by) != "foo-cluster" {
@@ -111,7 +147,7 @@ func TestBadSession(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer ts.Stop()
-	zk, err := ts.ConnectAll()
+	zk, _, err := ts.ConnectAll()
 	if err != nil {
 		t.Fatalf("Connect returned error: %+v", err)
 	}

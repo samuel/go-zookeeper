@@ -97,13 +97,17 @@ func (ts *TestCluster) Connect(idx int) (*Conn, error) {
 	return zk, err
 }
 
-func (ts *TestCluster) ConnectAll() (*Conn, error) {
+func (ts *TestCluster) ConnectAll() (*Conn, <-chan Event, error) {
+	return ts.ConnectAllTimeout(time.Second * 15)
+}
+
+func (ts *TestCluster) ConnectAllTimeout(sessionTimeout time.Duration) (*Conn, <-chan Event, error) {
 	hosts := make([]string, len(ts.Servers))
 	for i, srv := range ts.Servers {
 		hosts[i] = fmt.Sprintf("127.0.0.1:%d", srv.Port)
 	}
-	zk, _, err := Connect(hosts, time.Second*15)
-	return zk, err
+	zk, ch, err := Connect(hosts, sessionTimeout)
+	return zk, ch, err
 }
 
 func (ts *TestCluster) Stop() error {
