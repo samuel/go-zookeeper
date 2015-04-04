@@ -123,23 +123,28 @@ func ConnectWithDialer(servers []string, sessionTimeout time.Duration, dialer Di
 		return nil, nil, errors.New("zk: server list must not be empty")
 	}
 
-	// Randomize the order of the servers to avoid creating hotspots
-	stringShuffle(servers)
-
 	recvTimeout := sessionTimeout * 2 / 3
 
+	srvs := make([]string, len(servers))
+
 	for i, addr := range servers {
-		if !strings.Contains(addr, ":") {
-			servers[i] = addr + ":" + strconv.Itoa(DefaultPort)
+		if strings.Contains(addr, ":") {
+			srvs[i] = addr
+		} else {
+			srvs[i] = addr + ":" + strconv.Itoa(DefaultPort)
 		}
 	}
+
+	// Randomize the order of the servers to avoid creating hotspots
+	stringShuffle(srvs)
+
 	ec := make(chan Event, eventChanSize)
 	if dialer == nil {
 		dialer = net.DialTimeout
 	}
 	conn := Conn{
 		dialer:         dialer,
-		servers:        servers,
+		servers:        srvs,
 		serverIndex:    0,
 		conn:           nil,
 		state:          StateDisconnected,
