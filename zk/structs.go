@@ -34,7 +34,7 @@ type Stat struct {
 	Pzxid          int64 // last modified children
 }
 
-// Client is the information for a single Zookeper client and its session.
+// ServerClient is the information for a single Zookeeper client and its session.
 // This is used to parse/extract the output fo the `cons` command.
 type ServerClient struct {
 	Queued        int64
@@ -55,7 +55,7 @@ type ServerClient struct {
 	Error         error
 }
 
-// Clients is a struct for the FLWCons() function. It's used to provide
+// ServerClients is a struct for the FLWCons() function. It's used to provide
 // the list of Clients.
 //
 // This is needed because FLWCons() takes multiple servers.
