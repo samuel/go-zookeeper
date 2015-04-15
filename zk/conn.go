@@ -55,15 +55,16 @@ type Conn struct {
 	timeout   int32 // session timeout in milliseconds
 	passwd    []byte
 
-	dialer         Dialer
-	servers        []string
-	serverIndex    int
-	conn           net.Conn
-	eventChan      chan Event
-	shouldQuit     chan struct{}
-	pingInterval   time.Duration
-	recvTimeout    time.Duration
-	connectTimeout time.Duration
+	dialer          Dialer
+	servers         []string
+	serverIndex     int // remember last server that was tried during connect to round-robin attempts to servers
+	lastServerIndex int // index of the last server that was successfully connected to and authenticated with
+	conn            net.Conn
+	eventChan       chan Event
+	shouldQuit      chan struct{}
+	pingInterval    time.Duration
+	recvTimeout     time.Duration
+	connectTimeout  time.Duration
 
 	sendChan     chan *request
 	requests     map[int32]*request // Xid -> pending request
@@ -143,21 +144,22 @@ func ConnectWithDialer(servers []string, sessionTimeout time.Duration, dialer Di
 		dialer = net.DialTimeout
 	}
 	conn := Conn{
-		dialer:         dialer,
-		servers:        srvs,
-		serverIndex:    0,
-		conn:           nil,
-		state:          StateDisconnected,
-		eventChan:      ec,
-		shouldQuit:     make(chan struct{}),
-		recvTimeout:    recvTimeout,
-		pingInterval:   recvTimeout / 2,
-		connectTimeout: 1 * time.Second,
-		sendChan:       make(chan *request, sendChanSize),
-		requests:       make(map[int32]*request),
-		watchers:       make(map[watchPathType][]chan Event),
-		passwd:         emptyPassword,
-		timeout:        int32(sessionTimeout.Nanoseconds() / 1e6),
+		dialer:          dialer,
+		servers:         srvs,
+		serverIndex:     0,
+		lastServerIndex: -1,
+		conn:            nil,
+		state:           StateDisconnected,
+		eventChan:       ec,
+		shouldQuit:      make(chan struct{}),
+		recvTimeout:     recvTimeout,
+		pingInterval:    recvTimeout / 2,
+		connectTimeout:  1 * time.Second,
+		sendChan:        make(chan *request, sendChanSize),
+		requests:        make(map[int32]*request),
+		watchers:        make(map[watchPathType][]chan Event),
+		passwd:          emptyPassword,
+		timeout:         int32(sessionTimeout.Nanoseconds() / 1e6),
 
 		// Debug
 		reconnectDelay: 0,
@@ -194,23 +196,11 @@ func (c *Conn) setState(state State) {
 }
 
 func (c *Conn) connect() error {
-	c.serverIndex = (c.serverIndex + 1) % len(c.servers)
-	startIndex := c.serverIndex
 	c.setState(StateConnecting)
 	for {
-		zkConn, err := c.dialer("tcp", c.servers[c.serverIndex], c.connectTimeout)
-		if err == nil {
-			c.conn = zkConn
-			c.setState(StateConnected)
-			return nil
-		}
-
-		log.Printf("Failed to connect to %s: %+v", c.servers[c.serverIndex], err)
-
 		c.serverIndex = (c.serverIndex + 1) % len(c.servers)
-		if c.serverIndex == startIndex {
+		if c.serverIndex == c.lastServerIndex {
 			c.flushUnsentRequests(ErrNoServer)
-
 			select {
 			case <-time.After(time.Second):
 				// pass
@@ -219,7 +209,19 @@ func (c *Conn) connect() error {
 				c.flushUnsentRequests(ErrClosing)
 				return ErrClosing
 			}
+		} else if c.lastServerIndex < 0 {
+			// lastServerIndex defaults to -1 to avoid a delay on the initial connect
+			c.lastServerIndex = 0
 		}
+
+		zkConn, err := c.dialer("tcp", c.servers[c.serverIndex], c.connectTimeout)
+		if err == nil {
+			c.conn = zkConn
+			c.setState(StateConnected)
+			return nil
+		}
+
+		log.Printf("Failed to connect to %s: %+v", c.servers[c.serverIndex], err)
 	}
 }
 
@@ -237,6 +239,7 @@ func (c *Conn) loop() {
 		case err != nil && c.conn != nil:
 			c.conn.Close()
 		case err == nil:
+			c.lastServerIndex = c.serverIndex
 			closeChan := make(chan struct{}) // channel to tell send loop stop
 			var wg sync.WaitGroup
 
