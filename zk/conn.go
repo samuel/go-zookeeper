@@ -15,7 +15,9 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"math"
 	"net"
+	"runtime"
 	"strconv"
 	"strings"
 	"sync"
@@ -613,7 +615,22 @@ func (c *Conn) recvLoop(conn net.Conn) error {
 }
 
 func (c *Conn) nextXid() int32 {
-	return atomic.AddInt32(&c.xid, 1)
+	var xid int32
+	for {
+		xid = atomic.LoadInt32(&c.xid)
+		if xid >= math.MaxInt32-2 {
+			if atomic.CompareAndSwapInt32(&c.xid, xid, 0) {
+				buf := make([]byte, 65536)
+				runtime.Stack(buf, false)
+				log.Printf("Connection xid overflow, wrapped to zero\n%s", buf)
+				return 0
+			}
+		} else {
+			if atomic.CompareAndSwapInt32(&c.xid, xid, xid+1) {
+				return xid + 1
+			}
+		}
+	}
 }
 
 func (c *Conn) addWatcher(path string, watchType watchType) <-chan Event {
