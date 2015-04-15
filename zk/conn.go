@@ -51,7 +51,7 @@ type Conn struct {
 	lastZxid  int64
 	sessionID int64
 	state     State // must be 32-bit aligned
-	xid       int32
+	xid       uint32
 	timeout   int32 // session timeout in milliseconds
 	passwd    []byte
 
@@ -430,7 +430,7 @@ func (c *Conn) authenticate() error {
 	}
 
 	if c.sessionID != r.SessionID {
-		atomic.StoreInt32(&c.xid, 0)
+		atomic.StoreUint32(&c.xid, 0)
 	}
 	c.timeout = r.TimeOut
 	c.sessionID = r.SessionID
@@ -606,7 +606,7 @@ func (c *Conn) recvLoop(conn net.Conn) error {
 }
 
 func (c *Conn) nextXid() int32 {
-	return atomic.AddInt32(&c.xid, 1)
+	return int32(atomic.AddUint32(&c.xid, 1) & 0x7fffffff)
 }
 
 func (c *Conn) addWatcher(path string, watchType watchType) <-chan Event {
