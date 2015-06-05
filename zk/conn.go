@@ -14,9 +14,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"log"
 	"net"
-	"os"
 	"strconv"
 	"strings"
 	"sync"
@@ -24,7 +22,10 @@ import (
 	"time"
 )
 
-var ErrNoServer = errors.New("zk: could not connect to a server")
+var (
+	ErrNoServer   = errors.New("zk: could not connect to a server")
+	DefaultLogger = defaultLogger{}
+)
 
 const (
 	bufferSize      = 1536 * 1024
@@ -150,9 +151,6 @@ func ConnectWithDialer(servers []string, sessionTimeout time.Duration, dialer Di
 	if dialer == nil {
 		dialer = net.DialTimeout
 	}
-
-	newLogger := log.New(os.Stderr, "", log.LstdFlags)
-
 	conn := Conn{
 		dialer:          dialer,
 		servers:         srvs,
@@ -170,7 +168,7 @@ func ConnectWithDialer(servers []string, sessionTimeout time.Duration, dialer Di
 		watchers:        make(map[watchPathType][]chan Event),
 		passwd:          emptyPassword,
 		timeout:         int32(sessionTimeout.Nanoseconds() / 1e6),
-		logger:          newLogger,
+		logger:          DefaultLogger,
 
 		// Debug
 		reconnectDelay: 0,
@@ -284,7 +282,7 @@ func (c *Conn) loop() {
 
 		// Yeesh
 		if err != io.EOF && err != ErrSessionExpired && !strings.Contains(err.Error(), "use of closed network connection") {
-			c.logger.Printf("%s\n", err)
+			c.logger.Printf(err.Error())
 		}
 
 		select {
