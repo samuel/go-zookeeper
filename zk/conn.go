@@ -14,7 +14,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"log"
 	"net"
 	"strconv"
 	"strings"
@@ -23,7 +22,10 @@ import (
 	"time"
 )
 
-var ErrNoServer = errors.New("zk: could not connect to a server")
+var (
+	ErrNoServer   = errors.New("zk: could not connect to a server")
+	DefaultLogger = defaultLogger{}
+)
 
 const (
 	bufferSize      = 1536 * 1024
@@ -46,6 +48,10 @@ type watchPathType struct {
 }
 
 type Dialer func(network, address string, timeout time.Duration) (net.Conn, error)
+
+type Logger interface {
+	Printf(string, ...interface{})
+}
 
 type Conn struct {
 	lastZxid  int64
@@ -74,6 +80,8 @@ type Conn struct {
 
 	// Debug (used by unit tests)
 	reconnectDelay time.Duration
+
+	logger Logger
 }
 
 type request struct {
@@ -160,6 +168,7 @@ func ConnectWithDialer(servers []string, sessionTimeout time.Duration, dialer Di
 		watchers:        make(map[watchPathType][]chan Event),
 		passwd:          emptyPassword,
 		timeout:         int32(sessionTimeout.Nanoseconds() / 1e6),
+		logger:          DefaultLogger,
 
 		// Debug
 		reconnectDelay: 0,
@@ -184,6 +193,12 @@ func (c *Conn) Close() {
 
 func (c *Conn) State() State {
 	return State(atomic.LoadInt32((*int32)(&c.state)))
+}
+
+// SetLogger sets the logger to be used for printing errors.
+// Logger is an interface provided by this package.
+func (c *Conn) SetLogger(l Logger) {
+	c.logger = l
 }
 
 func (c *Conn) setState(state State) {
@@ -221,7 +236,7 @@ func (c *Conn) connect() error {
 			return nil
 		}
 
-		log.Printf("Failed to connect to %s: %+v", c.servers[c.serverIndex], err)
+		c.logger.Printf("Failed to connect to %s: %+v", c.servers[c.serverIndex], err)
 	}
 }
 
@@ -267,7 +282,7 @@ func (c *Conn) loop() {
 
 		// Yeesh
 		if err != io.EOF && err != ErrSessionExpired && !strings.Contains(err.Error(), "use of closed network connection") {
-			log.Println(err)
+			c.logger.Printf(err.Error())
 		}
 
 		select {
@@ -367,7 +382,7 @@ func (c *Conn) sendSetWatches() {
 		res := &setWatchesResponse{}
 		_, err := c.request(opSetWatches, req, res, nil)
 		if err != nil {
-			log.Printf("Failed to set previous watches: %s", err.Error())
+			c.logger.Printf("Failed to set previous watches: %s", err.Error())
 		}
 	}()
 }
@@ -582,7 +597,7 @@ func (c *Conn) recvLoop(conn net.Conn) error {
 		} else if res.Xid == -2 {
 			// Ping response. Ignore.
 		} else if res.Xid < 0 {
-			log.Printf("Xid < 0 (%d) but not ping or watcher event", res.Xid)
+			c.logger.Printf("Xid < 0 (%d) but not ping or watcher event", res.Xid)
 		} else {
 			if res.Zxid > 0 {
 				c.lastZxid = res.Zxid
@@ -596,7 +611,7 @@ func (c *Conn) recvLoop(conn net.Conn) error {
 			c.requestsLock.Unlock()
 
 			if !ok {
-				log.Printf("Response for unknown request with xid %d", res.Xid)
+				c.logger.Printf("Response for unknown request with xid %d", res.Xid)
 			} else {
 				if res.Err != 0 {
 					err = res.Err.toError()
