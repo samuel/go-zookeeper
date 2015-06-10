@@ -1,3 +1,4 @@
+// Package zk is a native Go client library for the ZooKeeper orchestration service.
 package zk
 
 /*
@@ -22,10 +23,16 @@ import (
 	"time"
 )
 
-var (
-	ErrNoServer   = errors.New("zk: could not connect to a server")
-	DefaultLogger = defaultLogger{}
-)
+// ErrNoServer indicates that an operation cannot be completed
+// because attempts to connect to all servers in the list failed.
+var ErrNoServer = errors.New("zk: could not connect to a server")
+
+// ErrInvalidPath indicates that an operation was being attempted on
+// an invalid path. (e.g. empty path)
+var ErrInvalidPath = errors.New("zk: invalid path")
+
+// DefaultLogger uses the stdlib log package for logging.
+var DefaultLogger = defaultLogger{}
 
 const (
 	bufferSize      = 1536 * 1024
@@ -49,6 +56,7 @@ type watchPathType struct {
 
 type Dialer func(network, address string, timeout time.Duration) (net.Conn, error)
 
+// Logger is an interface that can be implemented to provide custom log output.
 type Logger interface {
 	Printf(string, ...interface{})
 }
@@ -191,6 +199,7 @@ func (c *Conn) Close() {
 	}
 }
 
+// States returns the current state of the connection.
 func (c *Conn) State() State {
 	return State(atomic.LoadInt32((*int32)(&c.state)))
 }
@@ -709,6 +718,9 @@ func (c *Conn) GetW(path string) ([]byte, *Stat, <-chan Event, error) {
 }
 
 func (c *Conn) Set(path string, data []byte, version int32) (*Stat, error) {
+	if path == "" {
+		return nil, ErrInvalidPath
+	}
 	res := &setDataResponse{}
 	_, err := c.request(opSetData, &SetDataRequest{path, data, version}, res, nil)
 	return &res.Stat, err
