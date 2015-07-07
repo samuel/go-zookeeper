@@ -76,7 +76,6 @@ type Conn struct {
 	conn            net.Conn
 	eventChan       chan Event
 	shouldQuit      chan struct{}
-	pingInterval    time.Duration
 	recvTimeout     time.Duration
 	connectTimeout  time.Duration
 
@@ -140,8 +139,6 @@ func ConnectWithDialer(servers []string, sessionTimeout time.Duration, dialer Di
 		return nil, nil, errors.New("zk: server list must not be empty")
 	}
 
-	recvTimeout := sessionTimeout * 2 / 3
-
 	srvs := make([]string, len(servers))
 
 	for i, addr := range servers {
@@ -168,8 +165,7 @@ func ConnectWithDialer(servers []string, sessionTimeout time.Duration, dialer Di
 		state:           StateDisconnected,
 		eventChan:       ec,
 		shouldQuit:      make(chan struct{}),
-		recvTimeout:     recvTimeout,
-		pingInterval:    recvTimeout / 2,
+		recvTimeout:     sessionTimeout * 2 / 3,
 		connectTimeout:  1 * time.Second,
 		sendChan:        make(chan *request, sendChanSize),
 		requests:        make(map[int32]*request),
@@ -473,8 +469,7 @@ func (c *Conn) authenticate() error {
 }
 
 func (c *Conn) sendLoop(conn net.Conn, closeChan <-chan struct{}) error {
-	pingTicker := time.NewTicker(c.pingInterval)
-	defer pingTicker.Stop()
+	pingInterval := c.recvTimeout / 2
 
 	buf := make([]byte, bufferSize)
 	for {
@@ -516,7 +511,7 @@ func (c *Conn) sendLoop(conn net.Conn, closeChan <-chan struct{}) error {
 				conn.Close()
 				return err
 			}
-		case <-pingTicker.C:
+		case <-time.After(pingInterval):
 			n, err := encodePacket(buf[4:], &requestHeader{Xid: -2, Opcode: opPing})
 			if err != nil {
 				panic("zk: opPing should never fail to serialize")
