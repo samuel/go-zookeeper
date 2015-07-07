@@ -464,6 +464,7 @@ func (c *Conn) authenticate() error {
 	}
 
 	c.timeout = r.TimeOut
+	c.recvTimeout = time.Duration(r.TimeOut) * time.Millisecond * 2 / 3
 	c.sessionID = r.SessionID
 	c.passwd = r.Passwd
 	c.setState(StateHasSession)
