@@ -141,6 +141,7 @@ func ConnectWithDialer(servers []string, sessionTimeout time.Duration, dialer Di
 	}
 
 	recvTimeout := sessionTimeout * 2 / 3
+	connectTimeout := sessionTimeout * 2 / 3
 
 	srvs := make([]string, len(servers))
 
@@ -170,7 +171,7 @@ func ConnectWithDialer(servers []string, sessionTimeout time.Duration, dialer Di
 		shouldQuit:      make(chan struct{}),
 		recvTimeout:     recvTimeout,
 		pingInterval:    recvTimeout / 2,
-		connectTimeout:  1 * time.Second,
+		connectTimeout:  connectTimeout,
 		sendChan:        make(chan *request, sendChanSize),
 		requests:        make(map[int32]*request),
 		watchers:        make(map[watchPathType][]chan Event),
