@@ -100,7 +100,12 @@ func (ts *TestCluster) ConnectAll() (*Conn, error) {
 	for i, srv := range ts.Servers {
 		hosts[i] = fmt.Sprintf("127.0.0.1:%d", srv.Port)
 	}
-	zk, _, err := Connect(hosts, time.Second*15)
+	conf := ConnConf{
+		RecvTimeout:    30 * time.Second,
+		ConnTimeout:    3 * time.Second,
+		SessionTimeout: 30000,
+	}
+	zk, _, err := ConnectWithConfDialer(hosts, conf, nil)
 	return zk, err
 }
 

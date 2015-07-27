@@ -47,6 +47,14 @@ type watchPathType struct {
 
 type Dialer func(network, address string, timeout time.Duration) (net.Conn, error)
 
+//modified by chu
+
+type ConnConf struct {
+	RecvTimeout    time.Duration
+	ConnTimeout    time.Duration
+	SessionTimeout int32
+}
+
 type Conn struct {
 	lastZxid  int64
 	sessionID int64
@@ -108,7 +116,11 @@ func Connect(servers []string, recvTimeout time.Duration) (*Conn, <-chan Event, 
 	return ConnectWithDialer(servers, recvTimeout, nil)
 }
 
-func ConnectWithDialer(servers []string, recvTimeout time.Duration, dialer Dialer) (*Conn, <-chan Event, error) {
+func ConnectWithConf(servers []string, conf ConnConf) (*Conn, <-chan Event, error) {
+	return ConnectWithConfDialer(servers, conf, nil)
+}
+
+func ConnectWithConfDialer(servers []string, conf ConnConf, dialer Dialer) (*Conn, <-chan Event, error) {
 	// Randomize the order of the servers to avoid creating hotspots
 	stringShuffle(servers)
 
@@ -129,14 +141,14 @@ func ConnectWithDialer(servers []string, recvTimeout time.Duration, dialer Diale
 		state:          StateDisconnected,
 		eventChan:      ec,
 		shouldQuit:     make(chan bool),
-		recvTimeout:    recvTimeout,
-		pingInterval:   time.Duration((int64(recvTimeout) / 2)),
-		connectTimeout: 1 * time.Second,
+		recvTimeout:    conf.RecvTimeout,
+		pingInterval:   time.Duration((int64(conf.RecvTimeout) / 2)),
+		connectTimeout: conf.ConnTimeout,
 		sendChan:       make(chan *request, sendChanSize),
 		requests:       make(map[int32]*request),
 		watchers:       make(map[watchPathType][]chan Event),
 		passwd:         emptyPassword,
-		timeout:        30000,
+		timeout:        conf.SessionTimeout,
 
 		// Debug
 		reconnectDelay: time.Second,
@@ -148,6 +160,15 @@ func ConnectWithDialer(servers []string, recvTimeout time.Duration, dialer Diale
 		close(conn.eventChan)
 	}()
 	return &conn, ec, nil
+}
+
+func ConnectWithDialer(servers []string, recvTimeout time.Duration, dialer Dialer) (*Conn, <-chan Event, error) {
+	conf := ConnConf{
+		RecvTimeout:    recvTimeout,
+		ConnTimeout:    1 * time.Second,
+		SessionTimeout: 30000,
+	}
+	return ConnectWithConfDialer(servers, conf, dialer)
 }
 
 func (c *Conn) Close() {
@@ -211,6 +232,7 @@ func (c *Conn) loop() {
 			go func() {
 				c.sendLoop(c.conn, closeChan)
 				c.conn.Close() // causes recv loop to EOF/exit
+				//log.Printf("send end ")
 				wg.Done()
 			}()
 
@@ -220,13 +242,14 @@ func (c *Conn) loop() {
 				if err == nil {
 					panic("zk: recvLoop should never return nil error")
 				}
+				//log.Printf("recv end %+v", err)
 				close(closeChan) // tell send loop to exit
 				wg.Done()
 			}()
 
 			wg.Wait()
 		}
-
+		//log.Printf("disconnected %+v", err)
 		c.setState(StateDisconnected)
 
 		// Yeesh
@@ -411,6 +434,7 @@ func (c *Conn) sendLoop(conn net.Conn, closeChan <-chan bool) error {
 	for {
 		select {
 		case req := <-c.sendChan:
+			//log.Printf("req begin %+v", req)
 			header := &requestHeader{req.xid, req.opcode}
 			n, err := encodePacket(buf[4:], header)
 			if err != nil {
