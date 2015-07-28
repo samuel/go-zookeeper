@@ -2,7 +2,7 @@ package main
 
 import (
 	"fmt"
-	"github.com/test/go-zookeeper/zk"
+	"github.com/ngaut/go-zookeeper/zk"
 	"time"
 )
 
