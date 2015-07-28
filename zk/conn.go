@@ -219,7 +219,6 @@ func (c *Conn) loop() {
 	for {
 		c.connect()
 		err := c.authenticate()
-		log.Printf("connected %+v", err)
 		switch {
 		case err == ErrSessionExpired:
 			c.invalidateWatches(err)
@@ -233,7 +232,7 @@ func (c *Conn) loop() {
 			go func() {
 				c.sendLoop(c.conn, closeChan)
 				c.conn.Close() // causes recv loop to EOF/exit
-				log.Printf("send end ")
+				//log.Printf("send end ")
 				wg.Done()
 			}()
 
@@ -243,14 +242,14 @@ func (c *Conn) loop() {
 				if err == nil {
 					panic("zk: recvLoop should never return nil error")
 				}
-				log.Printf("recv end %+v", err)
+				//log.Printf("recv end %+v", err)
 				close(closeChan) // tell send loop to exit
 				wg.Done()
 			}()
 
 			wg.Wait()
 		}
-		log.Printf("disconnected %+v", err)
+		//log.Printf("disconnected %+v", err)
 		c.setState(StateDisconnected)
 
 		// Yeesh
@@ -435,7 +434,7 @@ func (c *Conn) sendLoop(conn net.Conn, closeChan <-chan bool) error {
 	for {
 		select {
 		case req := <-c.sendChan:
-			log.Printf("req begin %+v", req)
+			//log.Printf("req begin %+v", req)
 			header := &requestHeader{req.xid, req.opcode}
 			n, err := encodePacket(buf[4:], header)
 			if err != nil {
