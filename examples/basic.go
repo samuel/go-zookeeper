@@ -1,54 +1,36 @@
 package main
 
 import (
-	"fmt"
-	"github.com/ngaut/go-zookeeper/zk"
+	"github.com/test/go-zookeeper/zk"
 	"time"
 )
 
 func main() {
 
-	servers := []string{"192.168.28.191:2181"}
+	servers := []string{"192.168.28.192:2181"}
 
 	conf := zk.ConnConf{
 		RecvTimeout:    5 * time.Second,
 		ConnTimeout:    5 * time.Second,
-		SessionTimeout: 30000,
+		SessionTimeout: 1,
 	}
 
 	c, _, err := zk.ConnectWithConf(servers, conf)
 	if err != nil {
-		fmt.Println(err)
+		panic(err)
 	} else {
-		fmt.Println("connect success")
-
-		time.Sleep(20 * time.Second)
-
-		data, stat, err := c.Get("/zk/codis")
+		_, err := c.Create("/gozk-test/1", []byte("test"), 0, zk.WorldACL(zk.PermAll))
 		if err != nil {
-			fmt.Printf("get error : %+v", err)
-		} else {
-			fmt.Printf("get success : data: %+v stat: %+v", data, stat)
+			panic(err)
 		}
-		_, stat, ch, err := c.ChildrenW("/zk")
+		_, _, err = c.Get("/zk/codis")
 		if err != nil {
-			//fmt.Printf("%+v", err)
+			panic(err)
 		}
-		//fmt.Printf("%+v %+v\n", children, stat)
-		e := <-ch
-		fmt.Printf("%+v\n", e)
+		_, _, _, err = c.ChildrenW("/gozk-test")
+		if err != nil {
+			panic(err)
+		}
+		c.Close()
 	}
-	/*
-		c, _, err := zk.Connect([]string{"127.0.0.1"}, time.Second) //*10)
-		if err != nil {
-			panic(err)
-		}
-		children, stat, ch, err := c.ChildrenW("/")
-		if err != nil {
-			panic(err)
-		}
-		fmt.Printf("%+v %+v\n", children, stat)
-		e := <-ch
-		fmt.Printf("%+v\n", e)
-	*/
 }
