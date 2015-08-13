@@ -222,12 +222,51 @@ func (c *Conn) SetChroot(chroot string) {
 // looks like the chroot, for example '/chroot/chroot' or
 // '/prefix/abc/prefix/abc/data'. This is a common bug in ZooKeeper
 // clients, though.
-func (c *Conn) chrootPath(p string) string {
+func (c *Conn) addChroot(p string) string {
 	if strings.HasPrefix(p, c.chroot) {
 		// already chrooted
 		return p
 	}
 	return c.chroot + p
+}
+
+func (c *Conn) stripChroot(p string) string {
+	return strings.TrimPrefix(p, c.chroot)
+}
+
+// chrootify prepends conn.chroot to the path in a request. It
+// identifies the type of request using the opcode. If the request has
+// no path, nothing happens.
+func (c *Conn) chrootify(opcode int32, req interface{}) {
+	// pluck out path of struct if it is available
+	var pathVar *string
+	switch opcode {
+	case opCreate:
+		pathVar = &(req.(*CreateRequest).Path)
+	case opDelete:
+		pathVar = &(req.(*DeleteRequest).Path)
+	case opExists:
+		pathVar = &(req.(*existsRequest).Path)
+	case opGetAcl:
+		pathVar = &(req.(*getAclRequest).Path)
+	case opGetChildren:
+		pathVar = &(req.(*getChildrenRequest).Path)
+	case opGetChildren2:
+		pathVar = &(req.(*getChildren2Request).Path)
+	case opGetData:
+		pathVar = &(req.(*getDataRequest).Path)
+	case opSetAcl:
+		pathVar = &(req.(*setAclRequest).Path)
+	case opSetData:
+		pathVar = &(req.(*SetDataRequest).Path)
+	case opSync:
+		pathVar = &(req.(*syncRequest).Path)
+	case opCheck:
+		pathVar = &(req.(*CheckVersionRequest).Path)
+	}
+	if pathVar != nil {
+		*pathVar = c.addChroot(*pathVar)
+	}
 }
 
 func (c *Conn) setState(state State) {
@@ -364,7 +403,12 @@ func (c *Conn) invalidateWatches(err error) {
 
 	if len(c.watchers) >= 0 {
 		for pathType, watchers := range c.watchers {
-			ev := Event{Type: EventNotWatching, State: StateDisconnected, Path: pathType.path, Err: err}
+			ev := Event{
+				Type:  EventNotWatching,
+				State: StateDisconnected,
+				Path:  c.stripChroot(pathType.path),
+				Err:   err,
+			}
 			for _, ch := range watchers {
 				ch <- ev
 				close(ch)
@@ -592,10 +636,11 @@ func (c *Conn) recvLoop(conn net.Conn) error {
 			if err != nil {
 				return err
 			}
+			path := c.stripChroot(res.Path)
 			ev := Event{
 				Type:  res.Type,
 				State: res.State,
-				Path:  res.Path,
+				Path:  path,
 				Err:   nil,
 			}
 			select {
@@ -613,7 +658,7 @@ func (c *Conn) recvLoop(conn net.Conn) error {
 			}
 			c.watchersLock.Lock()
 			for _, t := range wTypes {
-				wpt := watchPathType{res.Path, t}
+				wpt := watchPathType{path, t}
 				if watchers := c.watchers[wpt]; watchers != nil && len(watchers) > 0 {
 					for _, ch := range watchers {
 						ch <- ev
@@ -686,38 +731,6 @@ func (c *Conn) queueRequest(opcode int32, req interface{}, res interface{}, recv
 	return rq.recvChan
 }
 
-func (c *Conn) chrootify(opcode int32, req interface{}) {
-	// pluck out path of struct if it is available
-	var pathVar *string
-	switch opcode {
-	case opCreate:
-		pathVar = &(req.(*CreateRequest).Path)
-	case opDelete:
-		pathVar = &(req.(*DeleteRequest).Path)
-	case opExists:
-		pathVar = &(req.(*existsRequest).Path)
-	case opGetAcl:
-		pathVar = &(req.(*getAclRequest).Path)
-	case opGetChildren:
-		pathVar = &(req.(*getChildrenRequest).Path)
-	case opGetChildren2:
-		pathVar = &(req.(*getChildren2Request).Path)
-	case opGetData:
-		pathVar = &(req.(*getDataRequest).Path)
-	case opSetAcl:
-		pathVar = &(req.(*setAclRequest).Path)
-	case opSetData:
-		pathVar = &(req.(*SetDataRequest).Path)
-	case opSync:
-		pathVar = &(req.(*syncRequest).Path)
-	case opCheck:
-		pathVar = &(req.(*CheckVersionRequest).Path)
-	}
-	if pathVar != nil {
-		*pathVar = c.chrootPath(*pathVar)
-	}
-}
-
 func (c *Conn) request(opcode int32, req interface{}, res interface{}, recvFunc func(*request, *responseHeader, error)) (int64, error) {
 	c.chrootify(opcode, req)
 	r := <-c.queueRequest(opcode, req, res, recvFunc)
@@ -771,7 +784,7 @@ func (c *Conn) GetW(path string) ([]byte, *Stat, <-chan Event, error) {
 }
 
 func (c *Conn) Set(path string, data []byte, version int32) (*Stat, error) {
-	if path == "" {
+	if c.addChroot(path) == "" {
 		return nil, ErrInvalidPath
 	}
 	res := &setDataResponse{}
@@ -782,7 +795,7 @@ func (c *Conn) Set(path string, data []byte, version int32) (*Stat, error) {
 func (c *Conn) Create(path string, data []byte, flags int32, acl []ACL) (string, error) {
 	res := &createResponse{}
 	_, err := c.request(opCreate, &CreateRequest{path, data, acl, flags}, res, nil)
-	return res.Path, err
+	return c.stripChroot(res.Path), err
 }
 
 // CreateProtectedEphemeralSequential fixes a race condition if the server crashes
