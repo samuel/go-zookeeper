@@ -103,7 +103,7 @@ func (ts *TestCluster) ConnectAll() (*Conn, error) {
 	conf := ConnConf{
 		RecvTimeout:    30 * time.Second,
 		ConnTimeout:    3 * time.Second,
-		SessionTimeout: 30 * time.Second,
+		SessionTimeout: 30000,
 	}
 	zk, _, err := ConnectWithConfDialer(hosts, conf, nil)
 	return zk, err
