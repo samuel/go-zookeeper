@@ -68,6 +68,7 @@ type Conn struct {
 	xid       uint32
 	timeout   int32 // session timeout in milliseconds
 	passwd    []byte
+	chroot    string
 
 	dialer          Dialer
 	servers         []string
@@ -165,6 +166,7 @@ func ConnectWithDialer(servers []string, sessionTimeout time.Duration, dialer Di
 		serverIndex:     0,
 		lastServerIndex: -1,
 		conn:            nil,
+		chroot:          "",
 		state:           StateDisconnected,
 		eventChan:       ec,
 		shouldQuit:      make(chan struct{}),
@@ -208,6 +210,24 @@ func (c *Conn) State() State {
 // Logger is an interface provided by this package.
 func (c *Conn) SetLogger(l Logger) {
 	c.logger = l
+}
+
+// SetChroot sets the connection to prefix all requested paths with
+// the given prefix string.
+func (c *Conn) SetChroot(chroot string) {
+	c.chroot = chroot
+}
+
+// BUG: Behavior could get quite odd if a chroot contains a path that
+// looks like the chroot, for example '/chroot/chroot' or
+// '/prefix/abc/prefix/abc/data'. This is a common bug in ZooKeeper
+// clients, though.
+func (c *Conn) chrootPath(p string) string {
+	if strings.HasPrefix(p, c.chroot) {
+		// already chrooted
+		return p
+	}
+	return c.chroot + p
 }
 
 func (c *Conn) setState(state State) {
@@ -666,7 +686,40 @@ func (c *Conn) queueRequest(opcode int32, req interface{}, res interface{}, recv
 	return rq.recvChan
 }
 
+func (c *Conn) chrootify(opcode int32, req interface{}) {
+	// pluck out path of struct if it is available
+	var pathVar *string
+	switch opcode {
+	case opCreate:
+		pathVar = &(req.(*CreateRequest).Path)
+	case opDelete:
+		pathVar = &(req.(*DeleteRequest).Path)
+	case opExists:
+		pathVar = &(req.(*existsRequest).Path)
+	case opGetAcl:
+		pathVar = &(req.(*getAclRequest).Path)
+	case opGetChildren:
+		pathVar = &(req.(*getChildrenRequest).Path)
+	case opGetChildren2:
+		pathVar = &(req.(*getChildren2Request).Path)
+	case opGetData:
+		pathVar = &(req.(*getDataRequest).Path)
+	case opSetAcl:
+		pathVar = &(req.(*setAclRequest).Path)
+	case opSetData:
+		pathVar = &(req.(*SetDataRequest).Path)
+	case opSync:
+		pathVar = &(req.(*syncRequest).Path)
+	case opCheck:
+		pathVar = &(req.(*CheckVersionRequest).Path)
+	}
+	if pathVar != nil {
+		*pathVar = c.chrootPath(*pathVar)
+	}
+}
+
 func (c *Conn) request(opcode int32, req interface{}, res interface{}, recvFunc func(*request, *responseHeader, error)) (int64, error) {
+	c.chrootify(opcode, req)
 	r := <-c.queueRequest(opcode, req, res, recvFunc)
 	return r.zxid, r.err
 }
@@ -859,6 +912,7 @@ func (c *Conn) Multi(ops ...interface{}) ([]MultiResponse, error) {
 		default:
 			return nil, fmt.Errorf("uknown operation type %T", op)
 		}
+		c.chrootify(opCode, req)
 		req.Ops = append(req.Ops, multiRequestOp{multiHeader{opCode, false, -1}, op})
 	}
 	res := &multiResponse{}
