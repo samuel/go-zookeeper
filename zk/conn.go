@@ -912,7 +912,7 @@ func (c *Conn) Multi(ops ...interface{}) ([]MultiResponse, error) {
 		default:
 			return nil, fmt.Errorf("uknown operation type %T", op)
 		}
-		c.chrootify(opCode, req)
+		c.chrootify(opCode, op)
 		req.Ops = append(req.Ops, multiRequestOp{multiHeader{opCode, false, -1}, op})
 	}
 	res := &multiResponse{}
