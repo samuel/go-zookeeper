@@ -297,7 +297,6 @@ func TestSetWatchers(t *testing.T) {
 		t.Fatal("Children should return at least 1 child")
 	}
 
-	zk.conn.Close()
 	if err := zk2.Delete(testPath, -1); err != nil && err != ErrNoNode {
 		t.Fatalf("Delete returned error: %+v", err)
 	}
@@ -334,7 +333,7 @@ func TestSetWatchers(t *testing.T) {
 	}
 }
 
-func TestExpiringWatch(t *testing.T) {
+func TestDisconnectingWatch(t *testing.T) {
 	ts, err := StartTestCluster(1, nil, logWriter{t: t, p: "[ZKERR] "})
 	if err != nil {
 		t.Fatal(err)
@@ -359,13 +358,12 @@ func TestExpiringWatch(t *testing.T) {
 		t.Fatal("Children should return at least 1 child")
 	}
 
-	zk.sessionID = 99999
 	zk.conn.Close()
 
 	select {
 	case ev := <-childCh:
-		if ev.Err != ErrSessionExpired {
-			t.Fatalf("Child watcher error %+v instead of expected ErrSessionExpired", ev.Err)
+		if ev.Err != ErrConnectionClosed {
+			t.Fatalf("Child watcher error %+v instead of expected ErrConnectionClosed", ev.Err)
 		}
 		if ev.Path != "/" {
 			t.Fatalf("Child watcher wrong path %s instead of %s", ev.Path, "/")

@@ -305,6 +305,7 @@ func (c *Conn) loop() {
 			err = ErrConnectionClosed
 		}
 		c.flushRequests(err)
+		c.invalidateWatches(err)
 
 		if c.reconnectDelay > 0 {
 			select {
