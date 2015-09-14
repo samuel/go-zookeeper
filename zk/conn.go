@@ -199,9 +199,14 @@ func (c *Conn) Close() {
 	}
 }
 
-// States returns the current state of the connection.
+// State returns the current state of the connection.
 func (c *Conn) State() State {
 	return State(atomic.LoadInt32((*int32)(&c.state)))
+}
+
+// SessionId returns the current session id of the connection.
+func (c *Conn) SessionID() int64 {
+	return c.sessionID
 }
 
 // SetLogger sets the logger to be used for printing errors.
