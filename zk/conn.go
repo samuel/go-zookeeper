@@ -392,6 +392,7 @@ func (c *Conn) sendSetWatches() {
 		_, err := c.request(opSetWatches, req, res, nil)
 		if err != nil {
 			c.logger.Printf("Failed to set previous watches: %s", err.Error())
+			c.invalidateWatches(err)
 		}
 	}()
 }
