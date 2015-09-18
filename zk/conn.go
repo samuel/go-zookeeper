@@ -854,7 +854,7 @@ func (c *Conn) Multi(ops ...interface{}) ([]MultiResponse, error) {
 		case *CheckVersionRequest:
 			opCode = opCheck
 		default:
-			return nil, fmt.Errorf("uknown operation type %T", op)
+			return nil, fmt.Errorf("unknown operation type %T", op)
 		}
 		req.Ops = append(req.Ops, multiRequestOp{multiHeader{opCode, false, -1}, op})
 	}
