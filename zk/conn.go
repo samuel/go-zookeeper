@@ -224,9 +224,9 @@ func (c *Conn) setState(state State) {
 }
 
 func (c *Conn) connect() error {
-	c.setState(StateConnecting)
 	for {
 		c.serverIndex = (c.serverIndex + 1) % len(c.servers)
+		c.setState(StateConnecting)
 		if c.serverIndex == c.lastServerIndex {
 			c.flushUnsentRequests(ErrNoServer)
 			select {
