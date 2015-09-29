@@ -246,6 +246,7 @@ func (c *Conn) connect() error {
 		if err == nil {
 			c.conn = zkConn
 			c.setState(StateConnected)
+			c.logger.Printf("Connected to %s", c.servers[c.serverIndex])
 			return nil
 		}
 
@@ -263,24 +264,29 @@ func (c *Conn) loop() {
 		err := c.authenticate()
 		switch {
 		case err == ErrSessionExpired:
+			c.logger.Printf("Authentication failed: %s", err)
 			c.invalidateWatches(err)
 		case err != nil && c.conn != nil:
+			c.logger.Printf("Authentication failed: %s", err)
 			c.conn.Close()
 		case err == nil:
+			c.logger.Printf("Authenticated: id=%d, timeout=%d", c.sessionID, c.sessionTimeoutMs)
 			c.lastServerIndex = c.serverIndex
 			closeChan := make(chan struct{}) // channel to tell send loop stop
 			var wg sync.WaitGroup
 
 			wg.Add(1)
 			go func() {
-				c.sendLoop(c.conn, closeChan)
+				err := c.sendLoop(c.conn, closeChan)
+				c.logger.Printf("Send loop terminated: err=%v", err)
 				c.conn.Close() // causes recv loop to EOF/exit
 				wg.Done()
 			}()
 
 			wg.Add(1)
 			go func() {
-				err = c.recvLoop(c.conn)
+				err := c.recvLoop(c.conn)
+				c.logger.Printf("Recv loop terminated: err=%v", err)
 				if err == nil {
 					panic("zk: recvLoop should never return nil error")
 				}
@@ -292,11 +298,6 @@ func (c *Conn) loop() {
 		}
 
 		c.setState(StateDisconnected)
-
-		// Yeesh
-		if err != io.EOF && err != ErrSessionExpired && !strings.Contains(err.Error(), "use of closed network connection") {
-			c.logger.Printf(err.Error())
-		}
 
 		select {
 		case <-c.shouldQuit:
