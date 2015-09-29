@@ -62,12 +62,12 @@ type Logger interface {
 }
 
 type Conn struct {
-	lastZxid  int64
-	sessionID int64
-	state     State // must be 32-bit aligned
-	xid       uint32
-	timeout   int32 // session timeout in milliseconds
-	passwd    []byte
+	lastZxid         int64
+	sessionID        int64
+	state            State // must be 32-bit aligned
+	xid              uint32
+	sessionTimeoutMs int32 // session timeout in milliseconds
+	passwd           []byte
 
 	dialer          Dialer
 	servers         []string
@@ -140,8 +140,6 @@ func ConnectWithDialer(servers []string, sessionTimeout time.Duration, dialer Di
 		return nil, nil, errors.New("zk: server list must not be empty")
 	}
 
-	recvTimeout := sessionTimeout * 2 / 3
-
 	srvs := make([]string, len(servers))
 
 	for i, addr := range servers {
@@ -168,19 +166,18 @@ func ConnectWithDialer(servers []string, sessionTimeout time.Duration, dialer Di
 		state:           StateDisconnected,
 		eventChan:       ec,
 		shouldQuit:      make(chan struct{}),
-		recvTimeout:     recvTimeout,
-		pingInterval:    recvTimeout / 2,
 		connectTimeout:  1 * time.Second,
 		sendChan:        make(chan *request, sendChanSize),
 		requests:        make(map[int32]*request),
 		watchers:        make(map[watchPathType][]chan Event),
 		passwd:          emptyPassword,
-		timeout:         int32(sessionTimeout.Nanoseconds() / 1e6),
 		logger:          DefaultLogger,
 
 		// Debug
 		reconnectDelay: 0,
 	}
+	conn.setTimeouts(int32(sessionTimeout / time.Millisecond))
+
 	go func() {
 		conn.loop()
 		conn.flushRequests(ErrClosing)
@@ -208,6 +205,13 @@ func (c *Conn) State() State {
 // Logger is an interface provided by this package.
 func (c *Conn) SetLogger(l Logger) {
 	c.logger = l
+}
+
+func (c *Conn) setTimeouts(sessionTimeoutMs int32) {
+	c.sessionTimeoutMs = sessionTimeoutMs
+	sessionTimeout := time.Duration(sessionTimeoutMs) * time.Millisecond
+	c.recvTimeout = sessionTimeout * 2 / 3
+	c.pingInterval = c.recvTimeout / 2
 }
 
 func (c *Conn) setState(state State) {
@@ -404,7 +408,7 @@ func (c *Conn) authenticate() error {
 	n, err := encodePacket(buf[4:], &connectRequest{
 		ProtocolVersion: protocolVersion,
 		LastZxidSeen:    c.lastZxid,
-		TimeOut:         c.timeout,
+		TimeOut:         c.sessionTimeoutMs,
 		SessionID:       c.sessionID,
 		Passwd:          c.passwd,
 	})
@@ -463,7 +467,7 @@ func (c *Conn) authenticate() error {
 		return ErrSessionExpired
 	}
 
-	c.timeout = r.TimeOut
+	c.setTimeouts(r.TimeOut)
 	c.sessionID = r.SessionID
 	c.passwd = r.Passwd
 	c.setState(StateHasSession)
