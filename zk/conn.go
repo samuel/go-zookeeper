@@ -405,8 +405,7 @@ func (c *Conn) sendSetWatches() {
 func (c *Conn) authenticate() error {
 	buf := make([]byte, 256)
 
-	// connect request
-
+	// Encode and send a connect request.
 	n, err := encodePacket(buf[4:], &connectRequest{
 		ProtocolVersion: protocolVersion,
 		LastZxidSeen:    c.lastZxid,
@@ -427,21 +426,12 @@ func (c *Conn) authenticate() error {
 		return err
 	}
 
-	// connect response
-
-	// package length
+	// Receive and decode a connect response.
 	c.conn.SetReadDeadline(time.Now().Add(c.recvTimeout * 10))
 	_, err = io.ReadFull(c.conn, buf[:4])
 	c.conn.SetReadDeadline(time.Time{})
 	if err != nil {
-		// Sometimes zookeeper just drops connection on invalid session data,
-		// we prefer to drop session and start from scratch when that event
-		// occurs instead of dropping into loop of connect/disconnect attempts
-		c.sessionID = 0
-		c.passwd = emptyPassword
-		c.lastZxid = 0
-		c.setState(StateExpired)
-		return ErrSessionExpired
+		return err
 	}
 
 	blen := int(binary.BigEndian.Uint32(buf[:4]))
