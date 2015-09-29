@@ -294,6 +294,7 @@ func (c *Conn) loop() {
 				wg.Done()
 			}()
 
+			c.sendSetWatches()
 			wg.Wait()
 		}
 
@@ -425,8 +426,6 @@ func (c *Conn) authenticate() error {
 	if err != nil {
 		return err
 	}
-
-	c.sendSetWatches()
 
 	// connect response
 
