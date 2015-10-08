@@ -492,15 +492,15 @@ func (c *Conn) authenticate() error {
 		return err
 	}
 	if r.SessionID == 0 {
-		c.sessionID = 0
+		atomic.StoreInt64(&c.sessionID, int64(0))
 		c.passwd = emptyPassword
 		c.lastZxid = 0
 		c.setState(StateExpired)
 		return ErrSessionExpired
 	}
 
+	atomic.StoreInt64(&c.sessionID, r.SessionID)
 	c.setTimeouts(r.TimeOut)
-	c.sessionID = r.SessionID
 	c.passwd = r.Passwd
 	c.setState(StateHasSession)
 
