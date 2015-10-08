@@ -438,7 +438,7 @@ func (c *Conn) authenticate() error {
 		// Sometimes zookeeper just drops connection on invalid session data,
 		// we prefer to drop session and start from scratch when that event
 		// occurs instead of dropping into loop of connect/disconnect attempts
-		c.sessionID = 0
+		atomic.StoreInt64(&c.sessionID, int64(0))
 		c.passwd = emptyPassword
 		c.lastZxid = 0
 		c.setState(StateExpired)
@@ -461,7 +461,7 @@ func (c *Conn) authenticate() error {
 		return err
 	}
 	if r.SessionID == 0 {
-		c.sessionID = 0
+		atomic.StoreInt64(&c.sessionID, int64(0))
 		c.passwd = emptyPassword
 		c.lastZxid = 0
 		c.setState(StateExpired)
@@ -469,7 +469,7 @@ func (c *Conn) authenticate() error {
 	}
 
 	c.timeout = r.TimeOut
-	c.sessionID = r.SessionID
+	atomic.StoreInt64(&c.sessionID, r.SessionID)
 	c.passwd = r.Passwd
 	c.setState(StateHasSession)
 
