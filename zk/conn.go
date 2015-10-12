@@ -71,7 +71,8 @@ type Conn struct {
 
 	dialer         Dialer
 	hostProvider   HostProvider
-	server         string // remember the address/port of the current server
+	serverMu       sync.Mutex // protects server
+	server         string     // remember the address/port of the current server
 	conn           net.Conn
 	eventChan      chan Event
 	shouldQuit     chan struct{}
@@ -253,7 +254,7 @@ func (c *Conn) setTimeouts(sessionTimeoutMs int32) {
 func (c *Conn) setState(state State) {
 	atomic.StoreInt32((*int32)(&c.state), int32(state))
 	select {
-	case c.eventChan <- Event{Type: EventSession, State: state, Server: c.server}:
+	case c.eventChan <- Event{Type: EventSession, State: state, Server: c.Server()}:
 	default:
 		// panic("zk: event channel full - it must be monitored and never allowed to be full")
 	}
@@ -262,7 +263,9 @@ func (c *Conn) setState(state State) {
 func (c *Conn) connect() error {
 	var retryStart bool
 	for {
+		c.serverMu.Lock()
 		c.server, retryStart = c.hostProvider.Next()
+		c.serverMu.Unlock()
 		c.setState(StateConnecting)
 		if retryStart {
 			c.flushUnsentRequests(ErrNoServer)
@@ -276,15 +279,15 @@ func (c *Conn) connect() error {
 			}
 		}
 
-		zkConn, err := c.dialer("tcp", c.server, c.connectTimeout)
+		zkConn, err := c.dialer("tcp", c.Server(), c.connectTimeout)
 		if err == nil {
 			c.conn = zkConn
 			c.setState(StateConnected)
-			c.logger.Printf("Connected to %s", c.server)
+			c.logger.Printf("Connected to %s", c.Server())
 			return nil
 		}
 
-		c.logger.Printf("Failed to connect to %s: %+v", c.server, err)
+		c.logger.Printf("Failed to connect to %s: %+v", c.Server(), err)
 	}
 }
 
@@ -892,4 +895,11 @@ func (c *Conn) Multi(ops ...interface{}) ([]MultiResponse, error) {
 		mr[i] = MultiResponse{Stat: op.Stat, String: op.String}
 	}
 	return mr, err
+}
+
+// Server returns the current or last-connected server name.
+func (c *Conn) Server() string {
+	c.serverMu.Lock()
+	defer c.serverMu.Unlock()
+	return c.server
 }
