@@ -203,7 +203,7 @@ func (c *Conn) State() State {
 
 // SessionId returns the current session id of the connection.
 func (c *Conn) SessionID() int64 {
-	return c.sessionID
+	return atomic.LoadInt64(&c.sessionID)
 }
 
 // SetLogger sets the logger to be used for printing errors.
