@@ -224,6 +224,12 @@ func WithHostProvider(hostProvider HostProvider) connOption {
 	}
 }
 
+func WithLogger(logger Logger) connOption {
+	return func(c *Conn) {
+		c.logger = logger
+	}
+}
+
 func (c *Conn) Close() {
 	close(c.shouldQuit)
 
