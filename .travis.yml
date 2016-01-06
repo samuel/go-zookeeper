@@ -16,7 +16,6 @@ branches:
     - master
 
 before_install:
-  - java install oraclejdk8
   - wget http://apache.claz.org/zookeeper/zookeeper-3.4.7/zookeeper-3.4.7.tar.gz
   - tar -zxvf zookeeper*tar.gz
 
