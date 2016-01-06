@@ -224,6 +224,18 @@ func WithHostProvider(hostProvider HostProvider) connOption {
 	}
 }
 
+func WithLogger(logger Logger) connOption {
+	return func(c *Conn) {
+		c.logger = logger
+	}
+}
+
+func WithConnectTimeout(connectTimeout time.Duration) connOption {
+	return func(c *Conn) {
+		c.connectTimeout = connectTimeout
+	}
+}
+
 func (c *Conn) Close() {
 	close(c.shouldQuit)
 

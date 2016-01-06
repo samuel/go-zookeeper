@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"camlistore.org/pkg/throttle"
+	"go4.org/net/throttle"
 )
 
 func TestCreate(t *testing.T) {
