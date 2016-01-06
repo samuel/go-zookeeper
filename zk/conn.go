@@ -230,6 +230,12 @@ func WithLogger(logger Logger) connOption {
 	}
 }
 
+func WithConnectTimeout(connectTimeout time.Duration) connOption {
+	return func(c *Conn) {
+		c.connectTimeout = connectTimeout
+	}
+}
+
 func (c *Conn) Close() {
 	close(c.shouldQuit)
 
