@@ -224,6 +224,21 @@ func WithHostProvider(hostProvider HostProvider) connOption {
 	}
 }
 
+// WithLogger returns a connection option specifying a non-default logger
+func WithLogger(logger Logger) connOption {
+	return func(c *Conn) {
+		c.logger = logger
+	}
+}
+
+// WithConnectTimeout returns a connection option specifying a non-default
+// timeout on establishing a connection to a ZooKeeper server
+func WithConnectTimeout(connectTimeout time.Duration) connOption {
+	return func(c *Conn) {
+		c.connectTimeout = connectTimeout
+	}
+}
+
 func (c *Conn) Close() {
 	close(c.shouldQuit)
 
@@ -233,7 +248,7 @@ func (c *Conn) Close() {
 	}
 }
 
-// States returns the current state of the connection.
+// State returns the current state of the connection.
 func (c *Conn) State() State {
 	return State(atomic.LoadInt32((*int32)(&c.state)))
 }
