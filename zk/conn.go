@@ -850,6 +850,7 @@ func (c *Conn) CancelEvent(evt <-chan Event) {
 			if evt == ch {
 				close(ch)
 				c.watchers[pathType] = append(watchers[:idx], watchers[idx+1:]...)
+				return
 			}
 		}
 	}
