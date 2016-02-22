@@ -447,7 +447,10 @@ func TestCancelEvent(t *testing.T) {
 	}
 
 	select {
-	case ev := <-childCh3:
+	case ev, closed := <-childCh3:
+		if closed {
+			t.Fatalf("Child channel 3 NOT expected to be closed")
+		}
 		if ev.Err != nil {
 			t.Fatalf("Child watcher error %+v", ev.Err)
 		}
