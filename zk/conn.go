@@ -31,6 +31,10 @@ var ErrNoServer = errors.New("zk: could not connect to a server")
 // an invalid path. (e.g. empty path)
 var ErrInvalidPath = errors.New("zk: invalid path")
 
+// ErrWatcherRemoved indicates that a watcher is removed(thus stopped) by user
+// manually
+var ErrWatcherRemoved = errors.New("watcher is removed by user")
+
 // DefaultLogger uses the stdlib log package for logging.
 var DefaultLogger Logger = defaultLogger{}
 
@@ -41,17 +45,17 @@ const (
 	protectedPrefix = "_c_"
 )
 
-type watchType int
+type WatchType int
 
 const (
-	watchTypeData  = iota
-	watchTypeExist = iota
-	watchTypeChild = iota
+	WatchTypeData = iota
+	WatchTypeExist
+	WatchTypeChild
 )
 
-type watchPathType struct {
-	path  string
-	wType watchType
+type WatchPathType struct {
+	Path  string
+	WType WatchType
 }
 
 type Dialer func(network, address string, timeout time.Duration) (net.Conn, error)
@@ -83,7 +87,7 @@ type Conn struct {
 	sendChan     chan *request
 	requests     map[int32]*request // Xid -> pending request
 	requestsLock sync.Mutex
-	watchers     map[watchPathType][]chan Event
+	watchers     map[WatchPathType]map[*Watcher]bool
 	watchersLock sync.Mutex
 
 	// Debug (used by unit tests)
@@ -115,6 +119,11 @@ type request struct {
 type response struct {
 	zxid int64
 	err  error
+}
+
+type Watcher struct {
+	Wpt   WatchPathType
+	EvtCh chan Event
 }
 
 type Event struct {
@@ -182,7 +191,7 @@ func Connect(servers []string, sessionTimeout time.Duration, options ...connOpti
 		connectTimeout: 1 * time.Second,
 		sendChan:       make(chan *request, sendChanSize),
 		requests:       make(map[int32]*request),
-		watchers:       make(map[watchPathType][]chan Event),
+		watchers:       make(map[WatchPathType]map[*Watcher]bool),
 		passwd:         emptyPassword,
 		logger:         DefaultLogger,
 
@@ -386,14 +395,21 @@ func (c *Conn) invalidateWatches(err error) {
 	defer c.watchersLock.Unlock()
 
 	if len(c.watchers) >= 0 {
-		for pathType, watchers := range c.watchers {
-			ev := Event{Type: EventNotWatching, State: StateDisconnected, Path: pathType.path, Err: err}
-			for _, ch := range watchers {
-				ch <- ev
-				close(ch)
+		for _, watchers := range c.watchers {
+			for w := range watchers {
+				c.invalidateWatcher(w, err)
 			}
 		}
-		c.watchers = make(map[watchPathType][]chan Event)
+		c.watchers = make(map[WatchPathType]map[*Watcher]bool)
+	}
+}
+
+func (c *Conn) invalidateWatcher(w *Watcher, err error) {
+	ev := Event{Type: EventNotWatching, State: c.state, Path: w.Wpt.Path, Err: err}
+	select {
+	case w.EvtCh <- ev:
+		close(w.EvtCh)
+	default:
 	}
 }
 
@@ -416,13 +432,13 @@ func (c *Conn) sendSetWatches() {
 		if len(watchers) == 0 {
 			continue
 		}
-		switch pathType.wType {
-		case watchTypeData:
-			req.DataWatches = append(req.DataWatches, pathType.path)
-		case watchTypeExist:
-			req.ExistWatches = append(req.ExistWatches, pathType.path)
-		case watchTypeChild:
-			req.ChildWatches = append(req.ChildWatches, pathType.path)
+		switch pathType.WType {
+		case WatchTypeData:
+			req.DataWatches = append(req.DataWatches, pathType.Path)
+		case WatchTypeExist:
+			req.ExistWatches = append(req.ExistWatches, pathType.Path)
+		case WatchTypeChild:
+			req.ChildWatches = append(req.ChildWatches, pathType.Path)
 		}
 		n++
 	}
@@ -610,22 +626,22 @@ func (c *Conn) recvLoop(conn net.Conn) error {
 			case c.eventChan <- ev:
 			default:
 			}
-			wTypes := make([]watchType, 0, 2)
+			wTypes := make([]WatchType, 0, 2)
 			switch res.Type {
 			case EventNodeCreated:
-				wTypes = append(wTypes, watchTypeExist)
+				wTypes = append(wTypes, WatchTypeExist)
 			case EventNodeDeleted, EventNodeDataChanged:
-				wTypes = append(wTypes, watchTypeExist, watchTypeData, watchTypeChild)
+				wTypes = append(wTypes, WatchTypeExist, WatchTypeData, WatchTypeChild)
 			case EventNodeChildrenChanged:
-				wTypes = append(wTypes, watchTypeChild)
+				wTypes = append(wTypes, WatchTypeChild)
 			}
 			c.watchersLock.Lock()
 			for _, t := range wTypes {
-				wpt := watchPathType{res.Path, t}
-				if watchers := c.watchers[wpt]; watchers != nil && len(watchers) > 0 {
-					for _, ch := range watchers {
-						ch <- ev
-						close(ch)
+				wpt := WatchPathType{res.Path, t}
+				if watchers, ok := c.watchers[wpt]; ok && len(watchers) > 0 {
+					for w := range watchers {
+						w.EvtCh <- ev
+						close(w.EvtCh)
 					}
 					delete(c.watchers, wpt)
 				}
@@ -671,14 +687,33 @@ func (c *Conn) nextXid() int32 {
 	return int32(atomic.AddUint32(&c.xid, 1) & 0x7fffffff)
 }
 
-func (c *Conn) addWatcher(path string, watchType watchType) <-chan Event {
+func (c *Conn) addWatcher(path string, WatchType WatchType) *Watcher {
 	c.watchersLock.Lock()
 	defer c.watchersLock.Unlock()
 
-	ch := make(chan Event, 1)
-	wpt := watchPathType{path, watchType}
-	c.watchers[wpt] = append(c.watchers[wpt], ch)
-	return ch
+	w := &Watcher{
+		Wpt:   WatchPathType{path, WatchType},
+		EvtCh: make(chan Event, 1),
+	}
+	if _, ok := c.watchers[w.Wpt]; !ok {
+		c.watchers[w.Wpt] = make(map[*Watcher]bool)
+	}
+	c.watchers[w.Wpt][w] = true
+	return w
+}
+
+// RemoveWatcher stops a watcher from watching, returns whether the watcher was
+// found during the deletion
+func (c *Conn) RemoveWatcher(w *Watcher) bool {
+	c.watchersLock.Lock()
+	defer c.watchersLock.Unlock()
+
+	if _, ok := c.watchers[w.Wpt]; ok {
+		c.invalidateWatcher(w, ErrWatcherRemoved)
+		delete(c.watchers[w.Wpt], w)
+		return true
+	}
+	return false
 }
 
 func (c *Conn) queueRequest(opcode int32, req interface{}, res interface{}, recvFunc func(*request, *responseHeader, error)) <-chan response {
@@ -710,18 +745,18 @@ func (c *Conn) Children(path string) ([]string, *Stat, error) {
 	return res.Children, &res.Stat, err
 }
 
-func (c *Conn) ChildrenW(path string) ([]string, *Stat, <-chan Event, error) {
-	var ech <-chan Event
+func (c *Conn) ChildrenW(path string) ([]string, *Stat, *Watcher, error) {
+	var w *Watcher
 	res := &getChildren2Response{}
 	_, err := c.request(opGetChildren2, &getChildren2Request{Path: path, Watch: true}, res, func(req *request, res *responseHeader, err error) {
 		if err == nil {
-			ech = c.addWatcher(path, watchTypeChild)
+			w = c.addWatcher(path, WatchTypeChild)
 		}
 	})
 	if err != nil {
 		return nil, nil, nil, err
 	}
-	return res.Children, &res.Stat, ech, err
+	return res.Children, &res.Stat, w, err
 }
 
 func (c *Conn) Get(path string) ([]byte, *Stat, error) {
@@ -731,18 +766,18 @@ func (c *Conn) Get(path string) ([]byte, *Stat, error) {
 }
 
 // GetW returns the contents of a znode and sets a watch
-func (c *Conn) GetW(path string) ([]byte, *Stat, <-chan Event, error) {
-	var ech <-chan Event
+func (c *Conn) GetW(path string) ([]byte, *Stat, *Watcher, error) {
+	var w *Watcher
 	res := &getDataResponse{}
 	_, err := c.request(opGetData, &getDataRequest{Path: path, Watch: true}, res, func(req *request, res *responseHeader, err error) {
 		if err == nil {
-			ech = c.addWatcher(path, watchTypeData)
+			w = c.addWatcher(path, WatchTypeData)
 		}
 	})
 	if err != nil {
 		return nil, nil, nil, err
 	}
-	return res.Data, &res.Stat, ech, err
+	return res.Data, &res.Stat, w, err
 }
 
 func (c *Conn) Set(path string, data []byte, version int32) (*Stat, error) {
@@ -821,14 +856,14 @@ func (c *Conn) Exists(path string) (bool, *Stat, error) {
 	return exists, &res.Stat, err
 }
 
-func (c *Conn) ExistsW(path string) (bool, *Stat, <-chan Event, error) {
-	var ech <-chan Event
+func (c *Conn) ExistsW(path string) (bool, *Stat, *Watcher, error) {
+	var w *Watcher
 	res := &existsResponse{}
 	_, err := c.request(opExists, &existsRequest{Path: path, Watch: true}, res, func(req *request, res *responseHeader, err error) {
 		if err == nil {
-			ech = c.addWatcher(path, watchTypeData)
+			w = c.addWatcher(path, WatchTypeData)
 		} else if err == ErrNoNode {
-			ech = c.addWatcher(path, watchTypeExist)
+			w = c.addWatcher(path, WatchTypeExist)
 		}
 	})
 	exists := true
@@ -839,7 +874,7 @@ func (c *Conn) ExistsW(path string) (bool, *Stat, <-chan Event, error) {
 	if err != nil {
 		return false, nil, nil, err
 	}
-	return exists, &res.Stat, ech, err
+	return exists, &res.Stat, w, err
 }
 
 func (c *Conn) GetACL(path string) ([]ACL, *Stat, error) {

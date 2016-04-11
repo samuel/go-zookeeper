@@ -108,7 +108,7 @@ func (l *Lock) Lock() error {
 		}
 
 		// Wait on the node next in line for the lock
-		_, _, ch, err := l.c.GetW(l.path + "/" + prevSeqPath)
+		_, _, w, err := l.c.GetW(l.path + "/" + prevSeqPath)
 		if err != nil && err != ErrNoNode {
 			return err
 		} else if err != nil && err == ErrNoNode {
@@ -116,7 +116,7 @@ func (l *Lock) Lock() error {
 			continue
 		}
 
-		ev := <-ch
+		ev := <-w.EvtCh
 		if ev.Err != nil {
 			return ev.Err
 		}
