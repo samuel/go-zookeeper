@@ -45,7 +45,7 @@ func parseSeq(path string) (int, error) {
 // Lock attempts to acquire the lock. It will wait to return until the lock
 // is acquired or an error occurs. If this instance already has the lock
 // then ErrDeadlock is returned.
-func (l *Lock) Lock() (string, error) {
+func (l *Lock) Lock(data []byte) (string, error) {
 	if l.lockPath != "" {
 		return "", ErrDeadlock
 	}
@@ -55,7 +55,7 @@ func (l *Lock) Lock() (string, error) {
 	path := ""
 	var err error
 	for i := 0; i < 3; i++ {
-		path, err = l.c.CreateProtectedEphemeralSequential(prefix, []byte{}, l.acl)
+		path, err = l.c.CreateProtectedEphemeralSequential(prefix, data, l.acl)
 		if err == ErrNoNode {
 			// Create parent node.
 			parts := strings.Split(l.path, "/")
