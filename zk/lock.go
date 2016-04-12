@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"sync"
 )
 
 var (
@@ -21,6 +22,7 @@ type Lock struct {
 	acl      []ACL
 	lockPath string
 	seq      int
+	pathLock *sync.Mutex
 }
 
 // NewLock creates a new lock instance using the provided connection, path, and acl.
@@ -28,9 +30,10 @@ type Lock struct {
 // unlocked until Lock() is called.
 func NewLock(c *Conn, path string, acl []ACL) *Lock {
 	return &Lock{
-		c:    c,
-		path: path,
-		acl:  acl,
+		c:        c,
+		path:     path,
+		acl:      acl,
+		pathLock: &sync.Mutex{},
 	}
 }
 
@@ -42,9 +45,9 @@ func parseSeq(path string) (int, error) {
 // Lock attempts to acquire the lock. It will wait to return until the lock
 // is acquired or an error occurs. If this instance already has the lock
 // then ErrDeadlock is returned.
-func (l *Lock) Lock() error {
+func (l *Lock) Lock(data []byte) (string, error) {
 	if l.lockPath != "" {
-		return ErrDeadlock
+		return "", ErrDeadlock
 	}
 
 	prefix := fmt.Sprintf("%s/lock-", l.path)
@@ -52,7 +55,7 @@ func (l *Lock) Lock() error {
 	path := ""
 	var err error
 	for i := 0; i < 3; i++ {
-		path, err = l.c.CreateProtectedEphemeralSequential(prefix, []byte{}, l.acl)
+		path, err = l.c.CreateProtectedEphemeralSequential(prefix, data, l.acl)
 		if err == ErrNoNode {
 			// Create parent node.
 			parts := strings.Split(l.path, "/")
@@ -61,28 +64,28 @@ func (l *Lock) Lock() error {
 				pth += "/" + p
 				_, err := l.c.Create(pth, []byte{}, 0, l.acl)
 				if err != nil && err != ErrNodeExists {
-					return err
+					return "", err
 				}
 			}
 		} else if err == nil {
 			break
 		} else {
-			return err
+			return "", err
 		}
 	}
 	if err != nil {
-		return err
+		return "", err
 	}
 
 	seq, err := parseSeq(path)
 	if err != nil {
-		return err
+		return "", err
 	}
 
 	for {
 		children, _, err := l.c.Children(l.path)
 		if err != nil {
-			return err
+			return "", err
 		}
 
 		lowestSeq := seq
@@ -91,7 +94,7 @@ func (l *Lock) Lock() error {
 		for _, p := range children {
 			s, err := parseSeq(p)
 			if err != nil {
-				return err
+				return "", err
 			}
 			if s < lowestSeq {
 				lowestSeq = s
@@ -110,7 +113,7 @@ func (l *Lock) Lock() error {
 		// Wait on the node next in line for the lock
 		_, _, ch, err := l.c.GetW(l.path + "/" + prevSeqPath)
 		if err != nil && err != ErrNoNode {
-			return err
+			return "", err
 		} else if err != nil && err == ErrNoNode {
 			// try again
 			continue
@@ -118,13 +121,13 @@ func (l *Lock) Lock() error {
 
 		ev := <-ch
 		if ev.Err != nil {
-			return ev.Err
+			return "", ev.Err
 		}
 	}
 
 	l.seq = seq
 	l.lockPath = path
-	return nil
+	return l.lockPath, nil
 }
 
 // Unlock releases an acquired lock. If the lock is not currently acquired by
@@ -139,4 +142,10 @@ func (l *Lock) Unlock() error {
 	l.lockPath = ""
 	l.seq = 0
 	return nil
+}
+
+func (l *Lock) Path() string {
+	l.pathLock.Lock()
+	defer l.pathLock.Unlock()
+	return l.path
 }

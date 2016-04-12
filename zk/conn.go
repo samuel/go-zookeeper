@@ -233,9 +233,14 @@ func (c *Conn) Close() {
 	}
 }
 
-// States returns the current state of the connection.
+// State returns the current state of the connection.
 func (c *Conn) State() State {
 	return State(atomic.LoadInt32((*int32)(&c.state)))
+}
+
+// SessionId returns the current session id of the connection.
+func (c *Conn) SessionID() int64 {
+	return atomic.LoadInt64(&c.sessionID)
 }
 
 // SetLogger sets the logger to be used for printing errors.
@@ -487,15 +492,15 @@ func (c *Conn) authenticate() error {
 		return err
 	}
 	if r.SessionID == 0 {
-		c.sessionID = 0
+		atomic.StoreInt64(&c.sessionID, int64(0))
 		c.passwd = emptyPassword
 		c.lastZxid = 0
 		c.setState(StateExpired)
 		return ErrSessionExpired
 	}
 
+	atomic.StoreInt64(&c.sessionID, r.SessionID)
 	c.setTimeouts(r.TimeOut)
-	c.sessionID = r.SessionID
 	c.passwd = r.Passwd
 	c.setState(StateHasSession)
 
