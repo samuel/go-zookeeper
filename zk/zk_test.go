@@ -429,8 +429,8 @@ func TestCancelEvent(t *testing.T) {
 	zk.CancelEvent(childCh2)
 
 	select {
-	case _, closed := <-childCh1:
-		if !closed {
+	case _, ok := <-childCh1:
+		if ok {
 			t.Fatalf("Child channel 1 expected to be closed")
 		}
 	case <-time.After(2 * time.Second):
@@ -438,8 +438,8 @@ func TestCancelEvent(t *testing.T) {
 	}
 
 	select {
-	case _, closed := <-childCh2:
-		if !closed {
+	case _, ok := <-childCh2:
+		if ok {
 			t.Fatalf("Child channel 2 expected to be closed")
 		}
 	case <-time.After(2 * time.Second):
@@ -447,8 +447,8 @@ func TestCancelEvent(t *testing.T) {
 	}
 
 	select {
-	case ev, closed := <-childCh3:
-		if closed {
+	case ev, ok := <-childCh3:
+		if !ok {
 			t.Fatalf("Child channel 3 NOT expected to be closed")
 		}
 		if ev.Err != nil {
