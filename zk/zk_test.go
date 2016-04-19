@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"camlistore.org/pkg/throttle"
+	"go4.org/net/throttle"
 )
 
 func TestCreate(t *testing.T) {
@@ -429,7 +429,7 @@ func TestCancelEvent(t *testing.T) {
 	zk.CancelEvent(childCh2)
 
 	select {
-	case ev, closed := <-childCh1:
+	case _, closed := <-childCh1:
 		if !closed {
 			t.Fatalf("Child channel 1 expected to be closed")
 		}
@@ -438,7 +438,7 @@ func TestCancelEvent(t *testing.T) {
 	}
 
 	select {
-	case ev, closed := <-childCh2:
+	case _, closed := <-childCh2:
 		if !closed {
 			t.Fatalf("Child channel 2 expected to be closed")
 		}
