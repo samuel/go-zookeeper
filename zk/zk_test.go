@@ -7,8 +7,6 @@ import (
 	"strings"
 	"testing"
 	"time"
-
-	"camlistore.org/pkg/throttle"
 )
 
 func TestCreate(t *testing.T) {
@@ -411,8 +409,8 @@ func TestSlowServer(t *testing.T) {
 
 	realAddr := fmt.Sprintf("127.0.0.1:%d", ts.Servers[0].Port)
 	proxyAddr, stopCh, err := startSlowProxy(t,
-		throttle.Rate{}, throttle.Rate{},
-		realAddr, func(ln *throttle.Listener) {
+		Rate{}, Rate{},
+		realAddr, func(ln *Listener) {
 			if ln.Up.Latency == 0 {
 				ln.Up.Latency = time.Millisecond * 2000
 				ln.Down.Latency = time.Millisecond * 2000
@@ -461,12 +459,12 @@ func TestSlowServer(t *testing.T) {
 	}
 }
 
-func startSlowProxy(t *testing.T, up, down throttle.Rate, upstream string, adj func(ln *throttle.Listener)) (string, chan bool, error) {
+func startSlowProxy(t *testing.T, up, down Rate, upstream string, adj func(ln *Listener)) (string, chan bool, error) {
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		return "", nil, err
 	}
-	tln := &throttle.Listener{
+	tln := &Listener{
 		Listener: ln,
 		Up:       up,
 		Down:     down,
