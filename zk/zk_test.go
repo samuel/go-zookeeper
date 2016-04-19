@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"camlistore.org/pkg/throttle"
+	"go4.org/net/throttle"
 )
 
 func TestCreate(t *testing.T) {
@@ -368,6 +368,91 @@ func TestExpiringWatch(t *testing.T) {
 	case ev := <-childCh:
 		if ev.Err != ErrSessionExpired {
 			t.Fatalf("Child watcher error %+v instead of expected ErrSessionExpired", ev.Err)
+		}
+		if ev.Path != "/" {
+			t.Fatalf("Child watcher wrong path %s instead of %s", ev.Path, "/")
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("Child watcher timed out")
+	}
+}
+
+func TestCancelEvent(t *testing.T) {
+	ts, err := StartTestCluster(1, nil, logWriter{t: t, p: "[ZKERR] "})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ts.Stop()
+	zk, _, err := ts.ConnectAll()
+	if err != nil {
+		t.Fatalf("Connect returned error: %+v", err)
+	}
+	defer zk.Close()
+
+	if err := zk.Delete("/gozk-test", -1); err != nil && err != ErrNoNode {
+		t.Fatalf("Delete returned error: %+v", err)
+	}
+
+	children, stat, childCh1, err := zk.ChildrenW("/")
+	if err != nil {
+		t.Fatalf("Children returned error: %+v", err)
+	} else if stat == nil {
+		t.Fatal("Children returned nil stat")
+	} else if len(children) < 1 {
+		t.Fatal("Children should return at least 1 child")
+	}
+
+	children, stat, childCh2, err := zk.ChildrenW("/")
+	if err != nil {
+		t.Fatalf("Children returned error: %+v", err)
+	} else if stat == nil {
+		t.Fatal("Children returned nil stat")
+	} else if len(children) < 1 {
+		t.Fatal("Children should return at least 1 child")
+	}
+
+	children, stat, childCh3, err := zk.ChildrenW("/")
+	if err != nil {
+		t.Fatalf("Children returned error: %+v", err)
+	} else if stat == nil {
+		t.Fatal("Children returned nil stat")
+	} else if len(children) < 1 {
+		t.Fatal("Children should return at least 1 child")
+	}
+
+	zk.CancelEvent(childCh1)
+	if path, err := zk.Create("/gozk-test", []byte{1, 2, 3, 4}, 0, WorldACL(PermAll)); err != nil {
+		t.Fatalf("Create returned error: %+v", err)
+	} else if path != "/gozk-test" {
+		t.Fatalf("Create returned different path '%s' != '/gozk-test'", path)
+	}
+	zk.CancelEvent(childCh2)
+
+	select {
+	case _, ok := <-childCh1:
+		if ok {
+			t.Fatalf("Child channel 1 expected to be closed")
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("Child watcher timed out")
+	}
+
+	select {
+	case _, ok := <-childCh2:
+		if ok {
+			t.Fatalf("Child channel 2 expected to be closed")
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("Child watcher timed out")
+	}
+
+	select {
+	case ev, ok := <-childCh3:
+		if !ok {
+			t.Fatalf("Child channel 3 NOT expected to be closed")
+		}
+		if ev.Err != nil {
+			t.Fatalf("Child watcher error %+v", ev.Err)
 		}
 		if ev.Path != "/" {
 			t.Fatalf("Child watcher wrong path %s instead of %s", ev.Path, "/")
