@@ -578,8 +578,8 @@ func (c *Conn) recvLoop(conn net.Conn) error {
 		}
 
 		blen := int(binary.BigEndian.Uint32(buf[:4]))
-		if cap(buf) < blen {
-			buf = make([]byte, blen)
+		if cap(buf) < (blen + 16) {
+			buf = make([]byte, blen + 16)
 		}
 
 		_, err = io.ReadFull(conn, buf[:blen])
