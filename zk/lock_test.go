@@ -20,7 +20,7 @@ func TestLock(t *testing.T) {
 	acls := WorldACL(PermAll)
 
 	l := NewLock(zk, "/test", acls)
-	if err := l.Lock(); err != nil {
+	if _, err := l.Lock([]byte{}); err != nil {
 		t.Fatal(err)
 	}
 	if err := l.Unlock(); err != nil {
@@ -29,13 +29,13 @@ func TestLock(t *testing.T) {
 
 	val := make(chan int, 3)
 
-	if err := l.Lock(); err != nil {
+	if _, err := l.Lock([]byte{}); err != nil {
 		t.Fatal(err)
 	}
 
 	l2 := NewLock(zk, "/test", acls)
 	go func() {
-		if err := l2.Lock(); err != nil {
+		if _, err := l2.Lock([]byte{}); err != nil {
 			t.Fatal(err)
 		}
 		val <- 2
@@ -85,7 +85,7 @@ func TestMultiLevelLock(t *testing.T) {
 	l := NewLock(zk, "/test-multi-level/lock", acls)
 	defer zk.Delete("/test-multi-level", -1) // Clean up what we've created for this test
 	defer zk.Delete("/test-multi-level/lock", -1)
-	if err := l.Lock(); err != nil {
+	if _, err := l.Lock([]byte{}); err != nil {
 		t.Fatal(err)
 	}
 	if err := l.Unlock(); err != nil {
