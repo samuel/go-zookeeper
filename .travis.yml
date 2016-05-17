@@ -1,26 +1,23 @@
 language: go
 env:
   global:
-    secure: U9Fhva2HMKan8VnkquGRmzth5TF7872lmsQOQWCw/4LuapUFBlPo9AN+bQOatnM6MjNLYLCx/D1TmJZ4Z9y9FtTcMXmDCThX7wKEDSutKyUyCp7xBkEChy8ICBQPA55XTuklHRYWeh1zL/dsE6oz2kk6Y7ETqGp74j8Y0OdFQTaR6CDtEji/CIR5qbba3sGBtfqB5i4sLiqqGIMwcLfhImNNO4ku0kgaK/Qk8YOfvpiePBe9f54/wdwDXpW+r9HCcYcayMYB+SrZqkfDOIxlDpVggBEMSs0M4AVBgWLbU6EGQJCd3zK5PeaqD62OBjEFUyF5JsJkn1X9vybaTXAg+Lh7RA36DUQaYPhcO+QAyv+qf4KNvoao+GIz83cfwTg5mqP1XubBAkKMg7vn9/ydFY0v1Kix5B94+5N2Bzmw94bIzibpMuirL5Dk9MLREfNp7u+Y+4MhjWJOcPTbyR0qsS8iVNK3LLTsg5xTwTy+qUdRWWeop+aZWCN2tclUf5Kam6m0Ght8FiBSaGeV5ftUfp26pi1bgL1R5kGaAZb48VYRq10v2Dys1aM6HZw72/GLtlwR76OQxcj/M0WZFTMby4+9pBk/Q3/S6GbW3imUWDyvcUrwjt3Hc5ir01BHRsFTLjqLfQoXRweY5SRqYq0+iuV8C5Gr3j3oL6W9VR5ytKY=
+  - secure: BBfRHs4O6AEdJJz0dufYcufcNDyA6rmfDIoef/6+LJWshisnekl1MbM+rnNm3zdqhcL4LFfpMOlUty5T+/u8bnxMq9tRXpa4knSH121MtqdyolLn3bqKCKfSRmwqq15lGYmJ0Zf5nIT0ulMWK72oNx9gRpNLqLiqztK6NJHJJv9VNgu977hnttTSuMPTV94UdYeD01mq3I/BpMeGeZRTZsGGctUNfsSVOE5wqwLaoy3TVTDlgGVo0C5uwXPAP5flPW1v41dne9C2R6Ew7Tu/TLV1EoHsbJBth83XLgg6CreHfpi25pZgeSpB0IafTRGy/cz86mTbenkrQ/2g6jPzGwOBHkD79TVwwihGj6BSdC/oMAB8DTPfe4x4G52Pu6ibHCRIFF+cQPtM5kKSlMT7cpBS7cQ19DHCiS8dE6uY+lWoVrHX9X/eJCVJ/DenpJ3NCazl38vTY6ABemWFHDTE7U+Qh+P5g55IY2300o1RB2NyCr7+svVgm4xDosrDN8ati+prqMKCAkFSyekJp9CNVU6oJ/+CmxbTx0ULjf7nbg1FBcKmrwr3EyhQhjl43rnQ3DI+zZg8Hz83HI5A+Sz6gaG2mauPd6CopkZFfP78A6Yt/gauKw4S4iQ6L2QVaFUW3EMDO6ky57/PtR+KQB2m6P7tjDfxCezQBzAe+dzZWu8=
 sudo: false
 matrix:
   include:
-    - go: 1.5
-    - go: 1.6
-    - go: tip
+  - go: 1.5
+  - go: 1.6
+  - go: tip
   allow_failures:
-    - go: tip
+  - go: tip
 before_install:
   - ./travis.sh -install
 script:
   - go build ./...
-  - go test -i -race ./...
-  # TODO
-  #  - go test -v -race -covermode=count -coverprofile=profile.cov ./...
-  - go test -v -race ./...
-  - fgt go vet ./...
-  # TODO x
-  # - fgt golint ./...
+  - go test -i -race ./zk
+  - go test -v -race -coverprofile=profile.cov ./zk
+  - fgt go vet ./zk
   - fgt gofmt -l .
+  # TODO make golint happy with go-zookeeper
+  # - fgt golint ./zk
   - goveralls -service=travis-ci -repotoken $COVERALLS_TOKEN -coverprofile=profile.cov
-
