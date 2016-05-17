@@ -40,8 +40,10 @@ func TestFLWRuok(t *testing.T) {
 
 	// close the connection, and pause shortly
 	// to cheat around a race condition
-	l.Close()
-	time.Sleep(time.Millisecond * 1)
+	if err = l.Close(); err != nil {
+		t.Fatalf(err.Error())
+	}
+	time.Sleep(time.Second)
 
 	if len(oks) == 0 {
 		t.Errorf("no values returned")
@@ -62,7 +64,12 @@ func TestFLWRuok(t *testing.T) {
 		t.Fatalf(err.Error())
 	}
 
-	defer l.Close()
+	defer func() {
+		if err = l.Close(); err != nil {
+			t.Fatalf(err.Error())
+		}
+		time.Sleep(time.Second)
+	}()
 
 	go tcpServer(l, "dead")
 
@@ -86,7 +93,12 @@ func TestFLWSrvr(t *testing.T) {
 		t.Fatalf(err.Error())
 	}
 
-	defer l.Close()
+	defer func() {
+		if err = l.Close(); err != nil {
+			t.Fatalf(err.Error())
+		}
+		time.Sleep(time.Second)
+	}()
 
 	go tcpServer(l, "")
 
@@ -172,7 +184,12 @@ func TestFLWCons(t *testing.T) {
 		t.Fatalf(err.Error())
 	}
 
-	defer l.Close()
+	defer func() {
+		if err = l.Close(); err != nil {
+			t.Fatalf(err.Error())
+		}
+		time.Sleep(time.Second)
+	}()
 
 	go tcpServer(l, "")
 
