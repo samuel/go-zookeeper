@@ -1,21 +1,24 @@
 language: go
-go:
-  - 1.6.1
-  - 1.5.4
 
+env:
+  global:
+    secure: U9Fhva2HMKan8VnkquGRmzth5TF7872lmsQOQWCw/4LuapUFBlPo9AN+bQOatnM6MjNLYLCx/D1TmJZ4Z9y9FtTcMXmDCThX7wKEDSutKyUyCp7xBkEChy8ICBQPA55XTuklHRYWeh1zL/dsE6oz2kk6Y7ETqGp74j8Y0OdFQTaR6CDtEji/CIR5qbba3sGBtfqB5i4sLiqqGIMwcLfhImNNO4ku0kgaK/Qk8YOfvpiePBe9f54/wdwDXpW+r9HCcYcayMYB+SrZqkfDOIxlDpVggBEMSs0M4AVBgWLbU6EGQJCd3zK5PeaqD62OBjEFUyF5JsJkn1X9vybaTXAg+Lh7RA36DUQaYPhcO+QAyv+qf4KNvoao+GIz83cfwTg5mqP1XubBAkKMg7vn9/ydFY0v1Kix5B94+5N2Bzmw94bIzibpMuirL5Dk9MLREfNp7u+Y+4MhjWJOcPTbyR0qsS8iVNK3LLTsg5xTwTy+qUdRWWeop+aZWCN2tclUf5Kam6m0Ght8FiBSaGeV5ftUfp26pi1bgL1R5kGaAZb48VYRq10v2Dys1aM6HZw72/GLtlwR76OQxcj/M0WZFTMby4+9pBk/Q3/S6GbW3imUWDyvcUrwjt3Hc5ir01BHRsFTLjqLfQoXRweY5SRqYq0+iuV8C5Gr3j3oL6W9VR5ytKY=
 sudo: false
-
-branches:
-  only:
-    - master
-
+matrix:
+  include:
+    - go: 1.5
+    - go: 1.6
+    - go: tip
+  allow_failures:
+    - go: tip
 before_install:
-  - wget http://apache.claz.org/zookeeper/zookeeper-3.4.6/zookeeper-3.4.6.tar.gz
-  - tar -zxvf zookeeper*tar.gz
-
+  - ./travis.sh -install
 script:
   - go build ./...
-  - go fmt ./...
-  - go vet ./...
   - go test -i -race ./...
-  - go test -v -race ./...
+  - go test -v race -covermode=count -coverprofile=profile.cov ./...
+  - fgt go vet ./...
+  - fgt golint ./...
+  - fgt gofmt -l .
+  - goveralls -service=travis-ci -repotoken $COVERALLS_TOKEN -coverprofile=profile.cov
+
