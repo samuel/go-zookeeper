@@ -1,12 +1,19 @@
 package zk
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"time"
 )
+
+var ErrServerStartVerificationTimeOut = errors.New("failed to verify server start")
+var ErrServerStopVerificationTimeOut = errors.New("failed to verify server stopped")
+var maxStartStopPolls = 5
+var startStopPollInterval = time.Second
 
 type ErrMissingServerConfigField string
 
@@ -109,15 +116,44 @@ func findZookeeperFatJar() string {
 	return ""
 }
 
+type serverState int
+
+const (
+	serverStateNew = iota
+	serverStateStopped
+	serverStateStarted
+	serverStateInconsistent
+)
+
+var serverStates = [...]string{
+	"init",
+	"stopped",
+	"started",
+	"inconsistent",
+}
+
+func (state serverState) String() string {
+	return serverStates[state]
+}
+
 type Server struct {
 	JarPath        string
 	ConfigPath     string
 	Stdout, Stderr io.Writer
-
-	cmd *exec.Cmd
+	Address        string
+	cmd            *exec.Cmd
+	state          serverState
 }
 
-func (srv *Server) Start() error {
+func (srv *Server) Start() (err error) {
+	DefaultLogger.Printf("start %s [state:%v]", srv.Address, srv.state)
+	defer func() {
+		if err == nil {
+			srv.state = serverStateStarted
+		} else {
+			srv.state = serverStateInconsistent
+		}
+	}()
 	if srv.JarPath == "" {
 		srv.JarPath = findZookeeperFatJar()
 		if srv.JarPath == "" {
@@ -127,10 +163,42 @@ func (srv *Server) Start() error {
 	srv.cmd = exec.Command("java", "-jar", srv.JarPath, "server", srv.ConfigPath)
 	srv.cmd.Stdout = srv.Stdout
 	srv.cmd.Stderr = srv.Stderr
-	return srv.cmd.Start()
+	if err = srv.cmd.Start(); err == nil {
+		for i := 0; i < maxStartStopPolls; i++ {
+			if ok := FLWRuok([]string{srv.Address}, time.Second); ok[0] {
+				return nil
+			}
+			time.Sleep(startStopPollInterval)
+		}
+		err = ErrServerStartVerificationTimeOut
+	}
+	return
 }
 
-func (srv *Server) Stop() error {
-	srv.cmd.Process.Signal(os.Kill)
-	return srv.cmd.Wait()
+func (srv *Server) Stop() (err error) {
+	DefaultLogger.Printf("stopping %s [state:%v]", srv.Address, srv.state)
+	defer func() {
+		if err == nil {
+			srv.state = serverStateStopped
+		} else {
+			srv.state = serverStateInconsistent
+		}
+	}()
+	err = srv.cmd.Process.Signal(os.Kill)
+	if err != nil {
+		DefaultLogger.Printf("error from kill was %T [%v]", err, err)
+		return
+	}
+	if err = srv.cmd.Wait(); err.Error() == "signal: killed" {
+		for i := 0; i < maxStartStopPolls; i++ {
+			if ok := FLWRuok([]string{srv.Address}, time.Second); !ok[0] {
+				return nil
+			}
+			time.Sleep(startStopPollInterval)
+		}
+		err = ErrServerStopVerificationTimeOut
+	} else {
+		DefaultLogger.Printf("error from wait was %T [%v]", err, err)
+	}
+	return
 }
