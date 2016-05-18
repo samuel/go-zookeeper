@@ -157,12 +157,14 @@ type Server struct {
 }
 
 func (srv *Server) Start() (err error) {
-	DefaultLogger.Printf("start %s [state:%v]", srv.Address, srv.state)
+	DefaultLogger.Printf("starting %s [state:%v]", srv.Address, srv.state)
 	defer func() {
 		if err == nil {
 			srv.state = serverStateStarted
+			DefaultLogger.Printf("started %s successfully", srv.Address)
 		} else {
 			srv.state = serverStateInconsistent
+			DefaultLogger.Printf("start %s failed: %v", srv.Address, err)
 		}
 	}()
 	if srv.JarPath == "" {
@@ -192,26 +194,30 @@ func (srv *Server) Stop() (err error) {
 	defer func() {
 		if err == nil {
 			srv.state = serverStateStopped
+			DefaultLogger.Printf("stopped %s successfully", srv.Address)
 		} else {
-			srv.state = serverStateInconsistent
+			if err.Error() == "os: process already finished" {
+				srv.state = serverStateStopped
+			} else {
+				srv.state = serverStateInconsistent
+			}
+			DefaultLogger.Printf("stop %s failed: %v", srv.Address, err)
 		}
 	}()
-	err = srv.cmd.Process.Signal(os.Kill)
-	if err != nil {
-		DefaultLogger.Printf("error from kill was %T [%v]", err, err)
-		return
+	errOk := srv.cmd.Process.Signal(os.Kill)
+	if errOk != nil {
+		DefaultLogger.Printf("error signaling kill while stopping %s: %v", srv.Address, errOk)
 	}
-	if err = srv.cmd.Wait(); err.Error() == "signal: killed" {
-		var i int
-		for ; i < maxStartStopPolls; i++ {
-			if ok := FLWRuok([]string{srv.Address}, time.Second); !ok[0] {
-				return nil
-			}
-			time.Sleep(startStopPollInterval)
+	if errOk = srv.cmd.Wait(); errOk.Error() != "signal: killed" {
+		DefaultLogger.Printf("unexpected error from wait while stopping %s: %v", srv.Address, errOk)
+	}
+	var i int
+	for ; i < maxStartStopPolls; i++ {
+		if ok := FLWRuok([]string{srv.Address}, time.Second); !ok[0] {
+			return nil
 		}
-		err = newRetryError(fmt.Sprintf("stopping %v", srv), startStopPollInterval, i)
-	} else {
-		DefaultLogger.Printf("error from wait was %T [%v]", err, err)
+		time.Sleep(startStopPollInterval)
 	}
+	err = newRetryError(fmt.Sprintf("stopping %v", srv), startStopPollInterval, i)
 	return
 }
