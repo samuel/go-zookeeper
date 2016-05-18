@@ -78,9 +78,10 @@ func StartTestCluster(size int, stdout, stderr io.Writer) (*TestCluster, error) 
 			ConfigPath: cfgPath,
 			Stdout:     stdout,
 			Stderr:     stderr,
+			Address:    fmt.Sprintf("%s:%d", "127.0.0.1", port),
 		}
 		if err := srv.Start(); err != nil {
-			return nil, err
+			panic(fmt.Sprintf("Unable to start server: %s [%v]", err, srv))
 		}
 		cluster.Servers = append(cluster.Servers, TestServer{
 			Path: srvPath,
@@ -122,7 +123,9 @@ func (ts *TestCluster) Stop() error {
 func (tc *TestCluster) StartServer(server string) {
 	for _, s := range tc.Servers {
 		if strings.HasSuffix(server, fmt.Sprintf(":%d", s.Port)) {
-			s.Srv.Start()
+			if err := s.Srv.Start(); err != nil {
+				panic(fmt.Sprintf("Unable to start server: %s [%v]", err, s.Srv))
+			}
 			return
 		}
 	}
@@ -132,7 +135,9 @@ func (tc *TestCluster) StartServer(server string) {
 func (tc *TestCluster) StopServer(server string) {
 	for _, s := range tc.Servers {
 		if strings.HasSuffix(server, fmt.Sprintf(":%d", s.Port)) {
-			s.Srv.Stop()
+			if err := s.Srv.Stop(); err != nil {
+				panic(fmt.Sprintf("Unable to stop server: %s [%v]", err, s.Srv))
+			}
 			return
 		}
 	}
