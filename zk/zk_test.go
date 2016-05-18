@@ -9,8 +9,6 @@ import (
 	"strings"
 	"testing"
 	"time"
-
-	"go4.org/net/throttle"
 )
 
 func TestCreate(t *testing.T) {
