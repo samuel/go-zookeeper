@@ -11,13 +11,9 @@ matrix:
   allow_failures:
   - go: tip
 before_install:
-  - ./travis.sh -install
+  - ./script/install_zk.sh -travis
+  - make tools
 script:
-  - go build ./...
-  - go test -i -race ./zk
-  - go test -v -race -coverprofile=profile.cov ./zk
-  - fgt go vet ./zk
-  - fgt gofmt -l .
-  # TODO make golint happy with go-zookeeper
-  # - fgt golint ./zk
+  - make test
+after_success:
   - goveralls -service=travis-ci -repotoken $COVERALLS_TOKEN -coverprofile=profile.cov

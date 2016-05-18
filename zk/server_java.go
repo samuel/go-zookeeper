@@ -23,7 +23,7 @@ func (e *retryError) Error() string {
 	return fmt.Sprintf("retry failed: %s (retried %d times over %v)", e.msg, e.attempts, e.duration*time.Duration(e.attempts))
 }
 
-var maxStartStopPolls = 15
+var maxStartStopPolls = 30
 var startStopPollInterval = time.Second
 
 type ErrMissingServerConfigField string
