@@ -1,7 +1,6 @@
 package zk
 
 import (
-	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -10,9 +9,21 @@ import (
 	"time"
 )
 
-var ErrServerStartVerificationTimeOut = errors.New("failed to verify server start")
-var ErrServerStopVerificationTimeOut = errors.New("failed to verify server stopped")
-var maxStartStopPolls = 5
+type retryError struct {
+	msg      string
+	duration time.Duration
+	attempts int
+}
+
+func newRetryError(msg string, duration time.Duration, attempts int) *retryError {
+	return &retryError{msg: msg, duration: duration, attempts: attempts}
+}
+
+func (e *retryError) Error() string {
+	return fmt.Sprintf("retry failed: %s (retried %d times over %v)", e.msg, e.attempts, e.duration*time.Duration(e.attempts))
+}
+
+var maxStartStopPolls = 15
 var startStopPollInterval = time.Second
 
 type ErrMissingServerConfigField string
@@ -164,13 +175,14 @@ func (srv *Server) Start() (err error) {
 	srv.cmd.Stdout = srv.Stdout
 	srv.cmd.Stderr = srv.Stderr
 	if err = srv.cmd.Start(); err == nil {
-		for i := 0; i < maxStartStopPolls; i++ {
+		var i int
+		for ; i < maxStartStopPolls; i++ {
 			if ok := FLWRuok([]string{srv.Address}, time.Second); ok[0] {
 				return nil
 			}
 			time.Sleep(startStopPollInterval)
 		}
-		err = ErrServerStartVerificationTimeOut
+		err = newRetryError(fmt.Sprintf("starting %v", srv), startStopPollInterval, i)
 	}
 	return
 }
@@ -190,13 +202,14 @@ func (srv *Server) Stop() (err error) {
 		return
 	}
 	if err = srv.cmd.Wait(); err.Error() == "signal: killed" {
-		for i := 0; i < maxStartStopPolls; i++ {
+		var i int
+		for ; i < maxStartStopPolls; i++ {
 			if ok := FLWRuok([]string{srv.Address}, time.Second); !ok[0] {
 				return nil
 			}
 			time.Sleep(startStopPollInterval)
 		}
-		err = ErrServerStopVerificationTimeOut
+		err = newRetryError(fmt.Sprintf("stopping %v", srv), startStopPollInterval, i)
 	} else {
 		DefaultLogger.Printf("error from wait was %T [%v]", err, err)
 	}

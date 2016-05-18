@@ -131,6 +131,7 @@ func TestNoQuorum(t *testing.T) {
 	begin := time.Now()
 	for time.Now().Sub(begin) < 6*time.Second {
 		disconnectedEvent := sl.NewWatcher(sessionStateMatcher(StateDisconnected)).Wait(4 * time.Second)
+		//TODO log disconnections to help debug flapping test (see next comment)
 		DefaultLogger.Printf("disconnected event %v", disconnectedEvent)
 		if disconnectedEvent == nil {
 			t.Fatalf("Disconnected event expected")
