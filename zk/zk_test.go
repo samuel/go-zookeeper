@@ -1,6 +1,8 @@
 package zk
 
 import (
+	"crypto/rand"
+	"encoding/hex"
 	"fmt"
 	"io"
 	"net"
@@ -178,6 +180,59 @@ func TestAuth(t *testing.T) {
 		t.Fatalf("Get returned nil Stat")
 	} else if len(data) != 4 {
 		t.Fatalf("Get returned wrong data length")
+	}
+}
+
+func TestChildren(t *testing.T) {
+	ts, err := StartTestCluster(1, nil, logWriter{t: t, p: "[ZKERR] "})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ts.Stop()
+	zk, _, err := ts.ConnectAll()
+	if err != nil {
+		t.Fatalf("Connect returned error: %+v", err)
+	}
+	defer zk.Close()
+
+	deleteNode := func(node string) {
+		if err := zk.Delete(node, -1); err != nil && err != ErrNoNode {
+			t.Fatalf("Delete returned error: %+v", err)
+		}
+	}
+
+	deleteNode("/gozk-test-big")
+
+	if path, err := zk.Create("/gozk-test-big", []byte{1, 2, 3, 4}, 0, WorldACL(PermAll)); err != nil {
+		t.Fatalf("Create returned error: %+v", err)
+	} else if path != "/gozk-test-big" {
+		t.Fatalf("Create returned different path '%s' != '/gozk-test-big'", path)
+	}
+
+	rb := make([]byte, 1000)
+	hb := make([]byte, 2000)
+	prefix := []byte("/gozk-test-big/")
+	for i := 0; i < 10000; i++ {
+		_, err := rand.Read(rb)
+		if err != nil {
+			t.Fatal("Cannot create random znode name")
+		}
+		hex.Encode(hb, rb)
+
+		expect := string(append(prefix, hb...))
+		if path, err := zk.Create(expect, []byte{1, 2, 3, 4}, 0, WorldACL(PermAll)); err != nil {
+			t.Fatalf("Create returned error: %+v", err)
+		} else if path != expect {
+			t.Fatalf("Create returned different path '%s' != '%s'", path, expect)
+		}
+		defer deleteNode(string(expect))
+	}
+
+	children, _, err := zk.Children("/gozk-test-big")
+	if err != nil {
+		t.Fatalf("Children returned error: %+v", err)
+	} else if len(children) != 10000 {
+		t.Fatal("Children returned wrong number of nodes")
 	}
 }
 

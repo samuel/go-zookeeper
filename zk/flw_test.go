@@ -25,98 +25,60 @@ Node count: 306
 )
 
 func TestFLWRuok(t *testing.T) {
-	l, err := net.Listen("tcp", "127.0.0.1:2181")
-
+	l, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
-		t.Fatalf(err.Error())
+		t.Fatal(err)
 	}
+	defer l.Close()
 
 	go tcpServer(l, "")
 
-	var oks []bool
-	var ok bool
-
-	oks = FLWRuok([]string{"127.0.0.1"}, time.Second*10)
-
-	// close the connection, and pause shortly
-	// to cheat around a race condition
-	if err = l.Close(); err != nil {
-		t.Fatalf(err.Error())
-	}
-	time.Sleep(time.Second)
-
+	oks := FLWRuok([]string{l.Addr().String()}, time.Second*10)
 	if len(oks) == 0 {
 		t.Errorf("no values returned")
 	}
-
-	ok = oks[0]
-
-	if !ok {
+	if !oks[0] {
 		t.Errorf("instance should be marked as OK")
 	}
 
 	//
 	// Confirm that it also returns false for dead instances
 	//
-	l, err = net.Listen("tcp", "127.0.0.1:2181")
-
+	l, err = net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
-		t.Fatalf(err.Error())
+		t.Fatal(err)
 	}
-
-	defer func() {
-		if err = l.Close(); err != nil {
-			t.Fatalf(err.Error())
-		}
-		time.Sleep(time.Second)
-	}()
+	defer l.Close()
 
 	go tcpServer(l, "dead")
 
-	oks = FLWRuok([]string{"127.0.0.1"}, time.Second*10)
-
+	oks = FLWRuok([]string{l.Addr().String()}, time.Second*10)
 	if len(oks) == 0 {
 		t.Errorf("no values returned")
 	}
-
-	ok = oks[0]
-
-	if ok {
+	if oks[0] {
 		t.Errorf("instance should be marked as not OK")
 	}
 }
 
 func TestFLWSrvr(t *testing.T) {
-	l, err := net.Listen("tcp", "127.0.0.1:2181")
-
+	l, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
-		t.Fatalf(err.Error())
+		t.Fatal(err)
 	}
-
-	defer func() {
-		if err = l.Close(); err != nil {
-			t.Fatalf(err.Error())
-		}
-		time.Sleep(time.Second)
-	}()
+	defer l.Close()
 
 	go tcpServer(l, "")
 
-	var statsSlice []*ServerStats
-	var stats *ServerStats
-	var ok bool
-
-	statsSlice, ok = FLWSrvr([]string{"127.0.0.1:2181"}, time.Second*10)
-
+	statsSlice, ok := FLWSrvr([]string{l.Addr().String()}, time.Second*10)
 	if !ok {
 		t.Errorf("failure indicated on 'srvr' parsing")
 	}
-
 	if len(statsSlice) == 0 {
 		t.Errorf("no *ServerStats instances returned")
 	}
 
-	stats = statsSlice[0]
+	stats := statsSlice[0]
 
 	if stats.Error != nil {
 		t.Fatalf("error seen in stats: %v", err.Error())
@@ -169,45 +131,27 @@ func TestFLWSrvr(t *testing.T) {
 	if stats.Version != "3.4.6-1569965" {
 		t.Errorf("Version expected: 3.4.6-1569965")
 	}
-
-	buildTime, err := time.Parse("01/02/2006 15:04 MST", "02/20/2014 09:09 GMT")
-
-	if !stats.BuildTime.Equal(buildTime) {
-
-	}
 }
 
 func TestFLWCons(t *testing.T) {
-	l, err := net.Listen("tcp", "127.0.0.1:2181")
-
+	l, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
-		t.Fatalf(err.Error())
+		t.Fatal(err)
 	}
-
-	defer func() {
-		if err = l.Close(); err != nil {
-			t.Fatalf(err.Error())
-		}
-		time.Sleep(time.Second)
-	}()
+	defer l.Close()
 
 	go tcpServer(l, "")
 
-	var clients []*ServerClients
-	var ok bool
-
-	clients, ok = FLWCons([]string{"127.0.0.1"}, time.Second*10)
-
+	clients, ok := FLWCons([]string{l.Addr().String()}, time.Second*10)
 	if !ok {
 		t.Errorf("failure indicated on 'cons' parsing")
 	}
-
 	if len(clients) == 0 {
 		t.Errorf("no *ServerClients instances returned")
 	}
 
 	results := []*ServerClient{
-		&ServerClient{
+		{
 			Queued:        0,
 			Received:      9435,
 			Sent:          9457,
@@ -224,7 +168,7 @@ func TestFLWCons(t *testing.T) {
 			MaxLatency:    17,
 			Addr:          "10.42.45.231:45361",
 		},
-		&ServerClient{
+		{
 			Queued:        0,
 			Received:      9338,
 			Sent:          9350,
@@ -241,7 +185,7 @@ func TestFLWCons(t *testing.T) {
 			MaxLatency:    18,
 			Addr:          "10.55.33.98:34342",
 		},
-		&ServerClient{
+		{
 			Queued:        0,
 			Received:      109253,
 			Sent:          109617,
@@ -351,7 +295,6 @@ func connHandler(conn net.Conn, thing string) {
 	data := make([]byte, 4)
 
 	_, err := conn.Read(data)
-
 	if err != nil {
 		return
 	}
