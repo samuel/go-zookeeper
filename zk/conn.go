@@ -312,7 +312,7 @@ func (c *Conn) loop() {
 			c.logger.Printf("Authentication failed: %s", err)
 			c.conn.Close()
 		case err == nil:
-			c.logger.Printf("Authenticated: id=%d, timeout=%d", c.sessionID, c.sessionTimeoutMs)
+			c.logger.Printf("Authenticated: id=%d, timeout=%d", c.SessionID(), c.sessionTimeoutMs)
 			c.hostProvider.Connected()       // mark success
 			closeChan := make(chan struct{}) // channel to tell send loop stop
 			var wg sync.WaitGroup
@@ -452,7 +452,7 @@ func (c *Conn) authenticate() error {
 		ProtocolVersion: protocolVersion,
 		LastZxidSeen:    c.lastZxid,
 		TimeOut:         c.sessionTimeoutMs,
-		SessionID:       c.sessionID,
+		SessionID:       c.SessionID(),
 		Passwd:          c.passwd,
 	})
 	if err != nil {
