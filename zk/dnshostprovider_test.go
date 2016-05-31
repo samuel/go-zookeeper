@@ -170,6 +170,8 @@ func TestDNSHostProviderReconnect(t *testing.T) {
 // It's also probably the clearest visual explanation of exactly how
 // it works.
 func TestDNSHostProviderRetryStart(t *testing.T) {
+	t.Parallel()
+
 	hp := &DNSHostProvider{lookupHost: func(host string) ([]string, error) {
 		return []string{"192.0.2.1", "192.0.2.2", "192.0.2.3"}, nil
 	}}
