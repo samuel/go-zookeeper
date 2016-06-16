@@ -18,6 +18,16 @@ func TestEncodeDecodePacket(t *testing.T) {
 	encodeDecodeTest(t, &multiRequest{Ops: []multiRequestOp{{multiHeader{opCheck, false, -1}, &CheckVersionRequest{"/", -1}}}})
 }
 
+func TestRequestStructForOp(t *testing.T) {
+	for op, name := range opNames {
+		if op != opNotify && op != opWatcherEvent {
+			if s := requestStructForOp(op); s == nil {
+				t.Errorf("No struct for op %s", name)
+			}
+		}
+	}
+}
+
 func encodeDecodeTest(t *testing.T, r interface{}) {
 	buf := make([]byte, 1024)
 	n, err := encodePacket(buf, r)
