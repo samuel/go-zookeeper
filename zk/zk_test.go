@@ -53,7 +53,6 @@ func TestStateChanges(t *testing.T) {
 	verifyEventOrder(eventChan, states, "event channel")
 
 	zk.Close()
-
 	verifyEventOrder(callbackChan, []State{StateDisconnected}, "callback")
 	verifyEventOrder(eventChan, []State{StateDisconnected}, "event channel")
 }
