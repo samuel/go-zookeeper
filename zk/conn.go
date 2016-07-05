@@ -224,6 +224,13 @@ func WithHostProvider(hostProvider HostProvider) connOption {
 	}
 }
 
+// WithLogger returns a connection option specifying a non-default logger.
+func WithLogger(l Logger) connOption {
+	return func(c *Conn) {
+		c.logger = l
+	}
+}
+
 func (c *Conn) Close() {
 	close(c.shouldQuit)
 
