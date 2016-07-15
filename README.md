@@ -6,6 +6,8 @@ Native Go Zookeeper Client Library
 
 Documentation: http://godoc.org/github.com/samuel/go-zookeeper/zk
 
+[Usage examples](./examples)
+
 License
 -------
 
