@@ -772,6 +772,71 @@ func (c *Conn) recvLoop(conn net.Conn) error {
 	}
 }
 
+func (c *Conn) removeWatches(path string, watcherType WatcherType) {
+	wTypes := make([]watchType, 0)
+	switch watcherType {
+	case WatcherTypeChildren:
+		wTypes = append(wTypes, watchTypeChild)
+	case WatcherTypeData:
+		wTypes = append(wTypes, watchTypeData, watchTypeExist)
+	case WatcherTypeAny:
+		wTypes = append(wTypes, watchTypeChild, watchTypeData, watchTypeExist)
+	}
+
+	c.watchersLock.Lock()
+	defer c.watchersLock.Unlock()
+
+	for _, t := range wTypes {
+		wpt := watchPathType{path, t}
+		if watchers := c.watchers[wpt]; watchers != nil && len(watchers) > 0 {
+			for _, ch := range watchers {
+				var ev Event
+
+				if t == watchTypeChild {
+					ev = Event{Type: EventNodeChildWatchRemoved, State: c.State(), Path: path, Err: nil}
+				} else {
+					ev = Event{Type: EventNodeDataWatchRemoved, State: c.State(), Path: path, Err: nil}
+				}
+
+				select {
+				case c.eventChan <- ev:
+				default:
+				}
+
+				ch <- ev
+				close(ch)
+			}
+			delete(c.watchers, wpt)
+		}
+	}
+}
+
+//
+// For the given path, removes the specified WatcherType.
+// A successful call guarantees that the removed watcher will
+// not be triggered.
+//
+// "local": whether the watcher can be removed locally when there is no server
+//          connection.
+//
+// If ZooKeeper does not support that feature, ErrUnimplemented will be returned.
+//
+func (c *Conn) RemoveWatcher(path string, watcherType WatcherType, local bool) error {
+	res := &removeWatchesResponse{}
+	_, err := c.request(opRemoveWatches, &removeWatchesRequest{Path: path, Type: watcherType}, res, func(req *request, res *responseHeader, err error) {
+		if err == nil {
+			c.removeWatches(path, watcherType)
+		}
+	})
+	if err != nil {
+		if local == true {
+			c.removeWatches(path, watcherType)
+		}
+		return err
+	}
+	return nil
+}
+
 func (c *Conn) nextXid() int32 {
 	return int32(atomic.AddUint32(&c.xid, 1) & 0x7fffffff)
 }

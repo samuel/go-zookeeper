@@ -11,33 +11,36 @@ const (
 )
 
 const (
-	opNotify       = 0
-	opCreate       = 1
-	opDelete       = 2
-	opExists       = 3
-	opGetData      = 4
-	opSetData      = 5
-	opGetAcl       = 6
-	opSetAcl       = 7
-	opGetChildren  = 8
-	opSync         = 9
-	opPing         = 11
-	opGetChildren2 = 12
-	opCheck        = 13
-	opMulti        = 14
-	opClose        = -11
-	opSetAuth      = 100
-	opSetWatches   = 101
-	opError        = -1
+	opNotify        = 0
+	opCreate        = 1
+	opDelete        = 2
+	opExists        = 3
+	opGetData       = 4
+	opSetData       = 5
+	opGetAcl        = 6
+	opSetAcl        = 7
+	opGetChildren   = 8
+	opSync          = 9
+	opPing          = 11
+	opGetChildren2  = 12
+	opCheck         = 13
+	opMulti         = 14
+	opRemoveWatches = 18
+	opClose         = -11
+	opSetAuth       = 100
+	opSetWatches    = 101
+	opError         = -1
 	// Not in protocol, used internally
 	opWatcherEvent = -2
 )
 
 const (
-	EventNodeCreated         EventType = 1
-	EventNodeDeleted         EventType = 2
-	EventNodeDataChanged     EventType = 3
-	EventNodeChildrenChanged EventType = 4
+	EventNodeCreated           EventType = 1
+	EventNodeDeleted           EventType = 2
+	EventNodeDataChanged       EventType = 3
+	EventNodeChildrenChanged   EventType = 4
+	EventNodeDataWatchRemoved  EventType = 5
+	EventNodeChildWatchRemoved EventType = 6
 
 	EventSession     EventType = -1
 	EventNotWatching EventType = -2
@@ -45,12 +48,14 @@ const (
 
 var (
 	eventNames = map[EventType]string{
-		EventNodeCreated:         "EventNodeCreated",
-		EventNodeDeleted:         "EventNodeDeleted",
-		EventNodeDataChanged:     "EventNodeDataChanged",
-		EventNodeChildrenChanged: "EventNodeChildrenChanged",
-		EventSession:             "EventSession",
-		EventNotWatching:         "EventNotWatching",
+		EventNodeCreated:           "EventNodeCreated",
+		EventNodeDeleted:           "EventNodeDeleted",
+		EventNodeDataChanged:       "EventNodeDataChanged",
+		EventNodeChildrenChanged:   "EventNodeChildrenChanged",
+		EventNodeDataWatchRemoved:  "EventNodeDataWatchRemoved",
+		EventNodeChildWatchRemoved: "EventNodeChildWatchRemoved",
+		EventSession:               "EventSession",
+		EventNotWatching:           "EventNotWatching",
 	}
 )
 
@@ -113,6 +118,8 @@ var (
 	ErrClosing                 = errors.New("zk: zookeeper is closing")
 	ErrNothing                 = errors.New("zk: no server responsees to process")
 	ErrSessionMoved            = errors.New("zk: session moved to another server, so operation is ignored")
+	ErrNoWatcher               = errors.New("zk: attempts to remove a non-existing watcher")
+	ErrUnimplemented           = errors.New("zk: operation is unimplemented")
 
 	// ErrInvalidCallback         = errors.New("zk: invalid callback specified")
 	errCodeToError = map[ErrCode]error{
@@ -126,11 +133,13 @@ var (
 		errNotEmpty:                ErrNotEmpty,
 		errSessionExpired:          ErrSessionExpired,
 		// errInvalidCallback:         ErrInvalidCallback,
-		errInvalidAcl:   ErrInvalidACL,
-		errAuthFailed:   ErrAuthFailed,
-		errClosing:      ErrClosing,
-		errNothing:      ErrNothing,
-		errSessionMoved: ErrSessionMoved,
+		errInvalidAcl:    ErrInvalidACL,
+		errAuthFailed:    ErrAuthFailed,
+		errClosing:       ErrClosing,
+		errUnimplemented: ErrUnimplemented,
+		errNothing:       ErrNothing,
+		errSessionMoved:  ErrSessionMoved,
+		errNoWatcher:     ErrNoWatcher,
 	}
 )
 
@@ -168,6 +177,7 @@ const (
 	errClosing                 ErrCode = -116
 	errNothing                 ErrCode = -117
 	errSessionMoved            ErrCode = -118
+	errNoWatcher                       = ErrCode(-121)
 )
 
 // Constants for ACL permissions
@@ -183,23 +193,24 @@ const (
 var (
 	emptyPassword = []byte{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}
 	opNames       = map[int32]string{
-		opNotify:       "notify",
-		opCreate:       "create",
-		opDelete:       "delete",
-		opExists:       "exists",
-		opGetData:      "getData",
-		opSetData:      "setData",
-		opGetAcl:       "getACL",
-		opSetAcl:       "setACL",
-		opGetChildren:  "getChildren",
-		opSync:         "sync",
-		opPing:         "ping",
-		opGetChildren2: "getChildren2",
-		opCheck:        "check",
-		opMulti:        "multi",
-		opClose:        "close",
-		opSetAuth:      "setAuth",
-		opSetWatches:   "setWatches",
+		opNotify:        "notify",
+		opCreate:        "create",
+		opDelete:        "delete",
+		opExists:        "exists",
+		opGetData:       "getData",
+		opSetData:       "setData",
+		opGetAcl:        "getACL",
+		opSetAcl:        "setACL",
+		opGetChildren:   "getChildren",
+		opSync:          "sync",
+		opPing:          "ping",
+		opGetChildren2:  "getChildren2",
+		opCheck:         "check",
+		opMulti:         "multi",
+		opClose:         "close",
+		opSetAuth:       "setAuth",
+		opSetWatches:    "setWatches",
+		opRemoveWatches: "removeWatches",
 
 		opWatcherEvent: "watcherEvent",
 	}

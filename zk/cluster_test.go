@@ -134,6 +134,10 @@ func TestNoQuorum(t *testing.T) {
 	DefaultLogger.Printf("    Kill the leader")
 	disconnectWatcher2 := sl.NewWatcher(sessionStateMatcher(StateDisconnected))
 	tc.StopServer(hasSessionEvent2.Server)
+	tmpEvent := sl.NewWatcher(sessionStateMatcher(StateDisconnected)).Wait(4 * time.Second)
+	if tmpEvent == nil {
+		t.Fatalf("StateDisconnected event not received from server: %s", hasSessionEvent2.Server)
+	}
 
 	disconnectedEvent2 := disconnectWatcher2.Wait(8 * time.Second)
 	if disconnectedEvent2 == nil {
