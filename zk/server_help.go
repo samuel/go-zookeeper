@@ -99,41 +99,41 @@ func StartTestCluster(size int, stdout, stderr io.Writer) (*TestCluster, error) 
 	return cluster, nil
 }
 
-func (ts *TestCluster) Connect(idx int) (*Conn, error) {
-	zk, _, err := Connect([]string{fmt.Sprintf("127.0.0.1:%d", ts.Servers[idx].Port)}, time.Second*15)
+func (tc *TestCluster) Connect(idx int) (*Conn, error) {
+	zk, _, err := Connect([]string{fmt.Sprintf("127.0.0.1:%d", tc.Servers[idx].Port)}, time.Second*15)
 	return zk, err
 }
 
-func (ts *TestCluster) ConnectAll() (*Conn, <-chan Event, error) {
-	return ts.ConnectAllTimeout(time.Second * 15)
+func (tc *TestCluster) ConnectAll() (*Conn, <-chan Event, error) {
+	return tc.ConnectAllTimeout(time.Second * 15)
 }
 
-func (ts *TestCluster) ConnectAllTimeout(sessionTimeout time.Duration) (*Conn, <-chan Event, error) {
-	return ts.ConnectWithOptions(sessionTimeout)
+func (tc *TestCluster) ConnectAllTimeout(sessionTimeout time.Duration) (*Conn, <-chan Event, error) {
+	return tc.ConnectWithOptions(sessionTimeout)
 }
 
-func (ts *TestCluster) ConnectWithOptions(sessionTimeout time.Duration, options ...connOption) (*Conn, <-chan Event, error) {
-	hosts := make([]string, len(ts.Servers))
-	for i, srv := range ts.Servers {
+func (tc *TestCluster) ConnectWithOptions(sessionTimeout time.Duration, options ...connOption) (*Conn, <-chan Event, error) {
+	hosts := make([]string, len(tc.Servers))
+	for i, srv := range tc.Servers {
 		hosts[i] = fmt.Sprintf("127.0.0.1:%d", srv.Port)
 	}
 	zk, ch, err := Connect(hosts, sessionTimeout, options...)
 	return zk, ch, err
 }
 
-func (ts *TestCluster) Stop() error {
-	for _, srv := range ts.Servers {
+func (tc *TestCluster) Stop() error {
+	for _, srv := range tc.Servers {
 		srv.Srv.Stop()
 	}
-	defer os.RemoveAll(ts.Path)
-	return ts.waitForStop(5, time.Second)
+	defer os.RemoveAll(tc.Path)
+	return tc.waitForStop(5, time.Second)
 }
 
 // waitForStart blocks until the cluster is up
-func (ts *TestCluster) waitForStart(maxRetry int, interval time.Duration) error {
+func (tc *TestCluster) waitForStart(maxRetry int, interval time.Duration) error {
 	// verify that the servers are up with SRVR
-	serverAddrs := make([]string, len(ts.Servers))
-	for i, s := range ts.Servers {
+	serverAddrs := make([]string, len(tc.Servers))
+	for i, s := range tc.Servers {
 		serverAddrs[i] = fmt.Sprintf("127.0.0.1:%d", s.Port)
 	}
 
@@ -148,10 +148,10 @@ func (ts *TestCluster) waitForStart(maxRetry int, interval time.Duration) error 
 }
 
 // waitForStop blocks until the cluster is down
-func (ts *TestCluster) waitForStop(maxRetry int, interval time.Duration) error {
+func (tc *TestCluster) waitForStop(maxRetry int, interval time.Duration) error {
 	// verify that the servers are up with RUOK
-	serverAddrs := make([]string, len(ts.Servers))
-	for i, s := range ts.Servers {
+	serverAddrs := make([]string, len(tc.Servers))
+	for i, s := range tc.Servers {
 		serverAddrs[i] = fmt.Sprintf("127.0.0.1:%d", s.Port)
 	}
 

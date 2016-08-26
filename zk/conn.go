@@ -44,9 +44,9 @@ const (
 type watchType int
 
 const (
-	watchTypeData  = iota
-	watchTypeExist = iota
-	watchTypeChild = iota
+	watchTypeData = iota
+	watchTypeExist
+	watchTypeChild
 )
 
 type watchPathType struct {
@@ -251,7 +251,7 @@ func (c *Conn) State() State {
 	return State(atomic.LoadInt32((*int32)(&c.state)))
 }
 
-// SessionId returns the current session id of the connection.
+// SessionID returns the current session id of the connection.
 func (c *Conn) SessionID() int64 {
 	return atomic.LoadInt64(&c.sessionID)
 }
