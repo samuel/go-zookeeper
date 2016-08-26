@@ -28,6 +28,7 @@ const (
 	opClose        = -11
 	opSetAuth      = 100
 	opSetWatches   = 101
+	opError        = -1
 	// Not in protocol, used internally
 	opWatcherEvent = -2
 )

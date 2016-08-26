@@ -125,6 +125,54 @@ func TestMulti(t *testing.T) {
 	}
 }
 
+func TestMultiFailures(t *testing.T) {
+	// This test case ensures that we return the errors associated with each
+	// opeThis in the event a call to Multi() fails.
+	const firstPath = "/gozk-test-first"
+	const secondPath = "/gozk-test-second"
+
+	ts, err := StartTestCluster(1, nil, logWriter{t: t, p: "[ZKERR] "})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ts.Stop()
+	zk, _, err := ts.ConnectAll()
+	if err != nil {
+		t.Fatalf("Connect returned error: %+v", err)
+	}
+	defer zk.Close()
+
+	// Ensure firstPath doesn't exist and secondPath does. This will cause the
+	// 2nd operation in the Multi() to fail.
+	if err := zk.Delete(firstPath, -1); err != nil && err != ErrNoNode {
+		t.Fatalf("Delete returned error: %+v", err)
+	}
+	if _, err := zk.Create(secondPath, nil /* data */, 0, WorldACL(PermAll)); err != nil {
+		t.Fatalf("Create returned error: %+v", err)
+	}
+
+	ops := []interface{}{
+		&CreateRequest{Path: firstPath, Data: []byte{1, 2}, Acl: WorldACL(PermAll)},
+		&CreateRequest{Path: secondPath, Data: []byte{3, 4}, Acl: WorldACL(PermAll)},
+	}
+	res, err := zk.Multi(ops...)
+	if err != ErrNodeExists {
+		t.Fatalf("Multi() didn't return correct error: %+v", err)
+	}
+	if len(res) != 2 {
+		t.Fatalf("Expected 2 responses received %d", len(res))
+	}
+	if res[0].Error != nil {
+		t.Fatalf("First operation returned an unexpected error %+v", res[0].Error)
+	}
+	if res[1].Error != ErrNodeExists {
+		t.Fatalf("Second operation returned incorrect error %+v", res[1].Error)
+	}
+	if _, _, err := zk.Get(firstPath); err != ErrNoNode {
+		t.Fatalf("Node %s was incorrectly created: %+v", firstPath, err)
+	}
+}
+
 func TestGetSetACL(t *testing.T) {
 	ts, err := StartTestCluster(1, nil, logWriter{t: t, p: "[ZKERR] "})
 	if err != nil {

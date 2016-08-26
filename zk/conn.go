@@ -885,6 +885,7 @@ func (c *Conn) Sync(path string) (string, error) {
 type MultiResponse struct {
 	Stat   *Stat
 	String string
+	Error  error
 }
 
 // Multi executes multiple ZooKeeper operations or none of them. The provided
@@ -915,7 +916,7 @@ func (c *Conn) Multi(ops ...interface{}) ([]MultiResponse, error) {
 	_, err := c.request(opMulti, req, res, nil)
 	mr := make([]MultiResponse, len(res.Ops))
 	for i, op := range res.Ops {
-		mr[i] = MultiResponse{Stat: op.Stat, String: op.String}
+		mr[i] = MultiResponse{Stat: op.Stat, String: op.String, Error: op.Err.toError()}
 	}
 	return mr, err
 }
