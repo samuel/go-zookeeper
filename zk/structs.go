@@ -346,7 +346,7 @@ func (r *multiResponse) Decode(buf []byte) (int, error) {
 		var w reflect.Value
 		switch header.Type {
 		default:
-			return total, ErrAPIError
+			return total, res.Header.Err.toError()
 		case opCreate:
 			w = reflect.ValueOf(&res.String)
 		case opSetData:
