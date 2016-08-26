@@ -112,16 +112,37 @@ func TestNoQuorum(t *testing.T) {
 
 	// Kill the ZooKeeper leader and wait for the session to reconnect.
 	DefaultLogger.Printf("    Kill the leader")
+	disconnectWatcher1 := sl.NewWatcher(sessionStateMatcher(StateDisconnected))
 	hasSessionWatcher2 := sl.NewWatcher(sessionStateMatcher(StateHasSession))
 	tc.StopServer(hasSessionEvent1.Server)
+
+	disconnectedEvent1 := disconnectWatcher1.Wait(8 * time.Second)
+	if disconnectedEvent1 == nil {
+		t.Fatalf("Failover failed, missed StateDisconnected event")
+	}
+	if disconnectedEvent1.Server != hasSessionEvent1.Server {
+		t.Fatalf("Unexpected StateDisconnected event, expected=%s, actual=%s",
+			hasSessionEvent1.Server, disconnectedEvent1.Server)
+	}
+
 	hasSessionEvent2 := hasSessionWatcher2.Wait(8 * time.Second)
 	if hasSessionEvent2 == nil {
-		t.Fatalf("Failover failed")
+		t.Fatalf("Failover failed, missed StateHasSession event")
 	}
 
 	// Kill the ZooKeeper leader leaving the cluster without quorum.
 	DefaultLogger.Printf("    Kill the leader")
+	disconnectWatcher2 := sl.NewWatcher(sessionStateMatcher(StateDisconnected))
 	tc.StopServer(hasSessionEvent2.Server)
+
+	disconnectedEvent2 := disconnectWatcher2.Wait(8 * time.Second)
+	if disconnectedEvent2 == nil {
+		t.Fatalf("Failover failed, missed StateDisconnected event")
+	}
+	if disconnectedEvent2.Server != hasSessionEvent2.Server {
+		t.Fatalf("Unexpected StateDisconnected event, expected=%s, actual=%s",
+			hasSessionEvent2.Server, disconnectedEvent2.Server)
+	}
 
 	// Make sure that we keep retrying connecting to the only remaining
 	// ZooKeeper server, but the attempts are being dropped because there is

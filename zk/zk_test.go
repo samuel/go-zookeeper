@@ -11,6 +11,52 @@ import (
 	"time"
 )
 
+func TestStateChanges(t *testing.T) {
+	ts, err := StartTestCluster(1, nil, logWriter{t: t, p: "[ZKERR] "})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ts.Stop()
+
+	callbackChan := make(chan Event)
+	f := func(event Event) {
+		callbackChan <- event
+	}
+
+	zk, eventChan, err := ts.ConnectWithOptions(15*time.Second, WithEventCallback(f))
+	if err != nil {
+		t.Fatalf("Connect returned error: %+v", err)
+	}
+
+	verifyEventOrder := func(c <-chan Event, expectedStates []State, source string) {
+		for _, state := range expectedStates {
+			for {
+				event, ok := <-c
+				if !ok {
+					t.Fatalf("unexpected channel close for %s", source)
+				}
+
+				if event.Type != EventSession {
+					continue
+				}
+
+				if event.State != state {
+					t.Fatalf("mismatched state order from %s, expected %v, received %v", source, state, event.State)
+				}
+				break
+			}
+		}
+	}
+
+	states := []State{StateConnecting, StateConnected, StateHasSession}
+	verifyEventOrder(callbackChan, states, "callback")
+	verifyEventOrder(eventChan, states, "event channel")
+
+	zk.Close()
+	verifyEventOrder(callbackChan, []State{StateDisconnected}, "callback")
+	verifyEventOrder(eventChan, []State{StateDisconnected}, "event channel")
+}
+
 func TestCreate(t *testing.T) {
 	ts, err := StartTestCluster(1, nil, logWriter{t: t, p: "[ZKERR] "})
 	if err != nil {

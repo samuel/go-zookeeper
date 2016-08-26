@@ -75,6 +75,7 @@ type Conn struct {
 	server         string     // remember the address/port of the current server
 	conn           net.Conn
 	eventChan      chan Event
+	eventCallback  EventCallback // may be nil
 	shouldQuit     chan struct{}
 	pingInterval   time.Duration
 	recvTimeout    time.Duration
@@ -224,6 +225,18 @@ func WithHostProvider(hostProvider HostProvider) connOption {
 	}
 }
 
+// EventCallback is a function that is called when an Event occurs.
+type EventCallback func(Event)
+
+// WithEventCallback returns a connection option that specifies an event
+// callback.
+// The callback must not block - doing so would delay the ZK go routines.
+func WithEventCallback(cb EventCallback) connOption {
+	return func(c *Conn) {
+		c.eventCallback = cb
+	}
+}
+
 func (c *Conn) Close() {
 	close(c.shouldQuit)
 
@@ -258,8 +271,16 @@ func (c *Conn) setTimeouts(sessionTimeoutMs int32) {
 
 func (c *Conn) setState(state State) {
 	atomic.StoreInt32((*int32)(&c.state), int32(state))
+	c.sendEvent(Event{Type: EventSession, State: state, Server: c.Server()})
+}
+
+func (c *Conn) sendEvent(evt Event) {
+	if c.eventCallback != nil {
+		c.eventCallback(evt)
+	}
+
 	select {
-	case c.eventChan <- Event{Type: EventSession, State: state, Server: c.Server()}:
+	case c.eventChan <- evt:
 	default:
 		// panic("zk: event channel full - it must be monitored and never allowed to be full")
 	}
@@ -611,10 +632,7 @@ func (c *Conn) recvLoop(conn net.Conn) error {
 				Path:  res.Path,
 				Err:   nil,
 			}
-			select {
-			case c.eventChan <- ev:
-			default:
-			}
+			c.sendEvent(ev)
 			wTypes := make([]watchType, 0, 2)
 			switch res.Type {
 			case EventNodeCreated:
