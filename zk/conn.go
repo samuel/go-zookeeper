@@ -61,6 +61,11 @@ type Logger interface {
 	Printf(string, ...interface{})
 }
 
+type authCreds struct {
+	scheme string
+	auth   []byte
+}
+
 type Conn struct {
 	lastZxid         int64
 	sessionID        int64
@@ -80,6 +85,9 @@ type Conn struct {
 	pingInterval   time.Duration
 	recvTimeout    time.Duration
 	connectTimeout time.Duration
+
+	creds   []authCreds
+	credsMu sync.Mutex // protects server
 
 	sendChan     chan *request
 	requests     map[int32]*request // Xid -> pending request
@@ -356,6 +364,20 @@ func (c *Conn) loop() {
 				close(closeChan) // tell send loop to exit
 				wg.Done()
 			}()
+
+			c.credsMu.Lock()
+			if len(c.creds) > 0 {
+				c.logger.Printf("Re-submitting %d credentials after reconnect",
+					len(c.creds))
+				for _, cred := range c.creds {
+					err := c.addAuthInner(cred.scheme, cred.auth)
+					if err != nil {
+						c.logger.Printf("Credential re-submit failed: %s", err)
+						// FIXME(prozlach): lets ignore it here for now
+					}
+				}
+			}
+			c.credsMu.Unlock()
 
 			c.sendSetWatches()
 			wg.Wait()
@@ -722,9 +744,35 @@ func (c *Conn) request(opcode int32, req interface{}, res interface{}, recvFunc 
 	return r.zxid, r.err
 }
 
-func (c *Conn) AddAuth(scheme string, auth []byte) error {
+func (c *Conn) addAuthInner(scheme string, auth []byte) error {
 	_, err := c.request(opSetAuth, &setAuthRequest{Type: 0, Scheme: scheme, Auth: auth}, &setAuthResponse{}, nil)
 	return err
+}
+
+func (c *Conn) AddAuth(scheme string, auth []byte) error {
+	err := c.addAuthInner(scheme, auth)
+
+	if err != nil {
+		return err
+	}
+
+	// Remember authdata so that it can be re-submitted on reconnect
+	//
+	// FIXME(prozlach): For now we treat "userfoo:passbar" and "userfoo:passbar2"
+	// as two different entries, which will be re-submitted on reconnet. Some
+	// research is needed on how ZK treats these cases and
+	// then maybe switch to something like "map[username] = password" to allow
+	// only single password for given user with users being unique.
+	obj := authCreds{
+		scheme: scheme,
+		auth:   auth,
+	}
+
+	c.credsMu.Lock()
+	c.creds = append(c.creds, obj)
+	c.credsMu.Unlock()
+
+	return nil
 }
 
 func (c *Conn) Children(path string) ([]string, *Stat, error) {
