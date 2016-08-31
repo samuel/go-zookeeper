@@ -192,3 +192,25 @@ func (tc *TestCluster) StopServer(server string) {
 	}
 	panic(fmt.Sprintf("Unknown server: %s", server))
 }
+
+func (tc *TestCluster) StartAllServers() error {
+	for _, s := range tc.Servers {
+		if err := s.Srv.Start(); err != nil {
+			return fmt.Errorf(
+				"Failed to start server listening on port `%d` : %+v", s.Port, err)
+		}
+	}
+
+	return nil
+}
+
+func (tc *TestCluster) StopAllServers() error {
+	for _, s := range tc.Servers {
+		if err := s.Srv.Stop(); err != nil {
+			return fmt.Errorf(
+				"Failed to stop server listening on port `%d` : %+v", s.Port, err)
+		}
+	}
+
+	return nil
+}
