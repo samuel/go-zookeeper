@@ -61,6 +61,11 @@ type Logger interface {
 	Printf(string, ...interface{})
 }
 
+type authCreds struct {
+	scheme string
+	auth   []byte
+}
+
 type Conn struct {
 	lastZxid         int64
 	sessionID        int64
@@ -81,16 +86,22 @@ type Conn struct {
 	recvTimeout    time.Duration
 	connectTimeout time.Duration
 
+	creds   []authCreds
+	credsMu sync.Mutex // protects server
+
 	sendChan     chan *request
 	requests     map[int32]*request // Xid -> pending request
 	requestsLock sync.Mutex
 	watchers     map[watchPathType][]chan Event
 	watchersLock sync.Mutex
+	closeChan    chan struct{} // channel to tell send loop stop
 
 	// Debug (used by unit tests)
 	reconnectDelay time.Duration
 
 	logger Logger
+
+	buf []byte
 }
 
 // connOption represents a connection option.
@@ -186,6 +197,7 @@ func Connect(servers []string, sessionTimeout time.Duration, options ...connOpti
 		watchers:       make(map[watchPathType][]chan Event),
 		passwd:         emptyPassword,
 		logger:         DefaultLogger,
+		buf:            make([]byte, bufferSize),
 
 		// Debug
 		reconnectDelay: 0,
@@ -317,6 +329,65 @@ func (c *Conn) connect() error {
 	}
 }
 
+func (c *Conn) resendZkAuth(reauthReadyChan chan struct{}) {
+	c.credsMu.Lock()
+	defer c.credsMu.Unlock()
+
+	defer close(reauthReadyChan)
+
+	c.logger.Printf("Re-submitting `%d` credentials after reconnect",
+		len(c.creds))
+
+	for _, cred := range c.creds {
+		resChan, err := c.sendRequest(
+			opSetAuth,
+			&setAuthRequest{Type: 0,
+				Scheme: cred.scheme,
+				Auth:   cred.auth,
+			},
+			&setAuthResponse{},
+			nil)
+
+		if err != nil {
+			c.logger.Printf("Call to sendRequest failed during credential resubmit: %s", err)
+			// FIXME(prozlach): lets ignore errors for now
+			continue
+		}
+
+		res := <-resChan
+		if res.err != nil {
+			c.logger.Printf("Credential re-submit failed: %s", res.err)
+			// FIXME(prozlach): lets ignore errors for now
+			continue
+		}
+	}
+}
+
+func (c *Conn) sendRequest(
+	opcode int32,
+	req interface{},
+	res interface{},
+	recvFunc func(*request, *responseHeader, error),
+) (
+	<-chan response,
+	error,
+) {
+	rq := &request{
+		xid:        c.nextXid(),
+		opcode:     opcode,
+		pkt:        req,
+		recvStruct: res,
+		recvChan:   make(chan response, 1),
+		recvFunc:   recvFunc,
+	}
+
+	if err := c.sendData(rq); err != nil {
+		return nil, err
+	}
+
+	return rq.recvChan, nil
+}
+
 func (c *Conn) loop() {
 	for {
 		if err := c.connect(); err != nil {
@@ -334,13 +405,15 @@ func (c *Conn) loop() {
 			c.conn.Close()
 		case err == nil:
 			c.logger.Printf("Authenticated: id=%d, timeout=%d", c.SessionID(), c.sessionTimeoutMs)
-			c.hostProvider.Connected()       // mark success
-			closeChan := make(chan struct{}) // channel to tell send loop stop
-			var wg sync.WaitGroup
+			c.hostProvider.Connected()        // mark success
+			c.closeChan = make(chan struct{}) // channel to tell send loop stop
+			reauthChan := make(chan struct{}) // channel to tell send loop that authdata has been resubmitted
 
+			var wg sync.WaitGroup
 			wg.Add(1)
 			go func() {
-				err := c.sendLoop(c.conn, closeChan)
+				<-reauthChan
+				err := c.sendLoop()
 				c.logger.Printf("Send loop terminated: err=%v", err)
 				c.conn.Close() // causes recv loop to EOF/exit
 				wg.Done()
@@ -353,9 +426,11 @@ func (c *Conn) loop() {
 				if err == nil {
 					panic("zk: recvLoop should never return nil error")
 				}
-				close(closeChan) // tell send loop to exit
+				close(c.closeChan) // tell send loop to exit
 				wg.Done()
 			}()
+
+			c.resendZkAuth(reauthChan)
 
 			c.sendSetWatches()
 			wg.Wait()
@@ -528,66 +603,73 @@ func (c *Conn) authenticate() error {
 	return nil
 }
 
-func (c *Conn) sendLoop(conn net.Conn, closeChan <-chan struct{}) error {
+func (c *Conn) sendData(req *request) error {
+	header := &requestHeader{req.xid, req.opcode}
+	n, err := encodePacket(c.buf[4:], header)
+	if err != nil {
+		req.recvChan <- response{-1, err}
+		return nil
+	}
+
+	n2, err := encodePacket(c.buf[4+n:], req.pkt)
+	if err != nil {
+		req.recvChan <- response{-1, err}
+		return nil
+	}
+
+	n += n2
+
+	binary.BigEndian.PutUint32(c.buf[:4], uint32(n))
+
+	c.requestsLock.Lock()
+	select {
+	case <-c.closeChan:
+		req.recvChan <- response{-1, ErrConnectionClosed}
+		c.requestsLock.Unlock()
+		return ErrConnectionClosed
+	default:
+	}
+	c.requests[req.xid] = req
+	c.requestsLock.Unlock()
+
+	c.conn.SetWriteDeadline(time.Now().Add(c.recvTimeout))
+	_, err = c.conn.Write(c.buf[:n+4])
+	c.conn.SetWriteDeadline(time.Time{})
+	if err != nil {
+		req.recvChan <- response{-1, err}
+		c.conn.Close()
+		return err
+	}
+
+	return nil
+}
+
+func (c *Conn) sendLoop() error {
 	pingTicker := time.NewTicker(c.pingInterval)
 	defer pingTicker.Stop()
 
-	buf := make([]byte, bufferSize)
 	for {
 		select {
 		case req := <-c.sendChan:
-			header := &requestHeader{req.xid, req.opcode}
-			n, err := encodePacket(buf[4:], header)
-			if err != nil {
-				req.recvChan <- response{-1, err}
-				continue
-			}
-
-			n2, err := encodePacket(buf[4+n:], req.pkt)
-			if err != nil {
-				req.recvChan <- response{-1, err}
-				continue
-			}
-
-			n += n2
-
-			binary.BigEndian.PutUint32(buf[:4], uint32(n))
-
-			c.requestsLock.Lock()
-			select {
-			case <-closeChan:
-				req.recvChan <- response{-1, ErrConnectionClosed}
-				c.requestsLock.Unlock()
-				return ErrConnectionClosed
-			default:
-			}
-			c.requests[req.xid] = req
-			c.requestsLock.Unlock()
-
-			conn.SetWriteDeadline(time.Now().Add(c.recvTimeout))
-			_, err = conn.Write(buf[:n+4])
-			conn.SetWriteDeadline(time.Time{})
-			if err != nil {
-				req.recvChan <- response{-1, err}
-				conn.Close()
+			if err := c.sendData(req); err != nil {
 				return err
 			}
 		case <-pingTicker.C:
-			n, err := encodePacket(buf[4:], &requestHeader{Xid: -2, Opcode: opPing})
+			n, err := encodePacket(c.buf[4:], &requestHeader{Xid: -2, Opcode: opPing})
 			if err != nil {
 				panic("zk: opPing should never fail to serialize")
 			}
 
-			binary.BigEndian.PutUint32(buf[:4], uint32(n))
+			binary.BigEndian.PutUint32(c.buf[:4], uint32(n))
 
-			conn.SetWriteDeadline(time.Now().Add(c.recvTimeout))
-			_, err = conn.Write(buf[:n+4])
-			conn.SetWriteDeadline(time.Time{})
+			c.conn.SetWriteDeadline(time.Now().Add(c.recvTimeout))
+			_, err = c.conn.Write(c.buf[:n+4])
+			c.conn.SetWriteDeadline(time.Time{})
 			if err != nil {
-				conn.Close()
+				c.conn.Close()
 				return err
 			}
-		case <-closeChan:
+		case <-c.closeChan:
 			return nil
 		}
 	}
@@ -724,7 +806,28 @@ func (c *Conn) request(opcode int32, req interface{}, res interface{}, recvFunc 
 
 func (c *Conn) AddAuth(scheme string, auth []byte) error {
 	_, err := c.request(opSetAuth, &setAuthRequest{Type: 0, Scheme: scheme, Auth: auth}, &setAuthResponse{}, nil)
-	return err
+
+	if err != nil {
+		return err
+	}
+
+	// Remember authdata so that it can be re-submitted on reconnect
+	//
+	// FIXME(prozlach): For now we treat "userfoo:passbar" and "userfoo:passbar2"
+	// as two different entries, which will be re-submitted on reconnet. Some
+	// research is needed on how ZK treats these cases and
+	// then maybe switch to something like "map[username] = password" to allow
+	// only single password for given user with users being unique.
+	obj := authCreds{
+		scheme: scheme,
+		auth:   auth,
+	}
+
+	c.credsMu.Lock()
+	c.creds = append(c.creds, obj)
+	c.credsMu.Unlock()
+
+	return nil
 }
 
 func (c *Conn) Children(path string) ([]string, *Stat, error) {

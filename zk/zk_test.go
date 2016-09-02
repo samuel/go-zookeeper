@@ -125,6 +125,57 @@ func TestMulti(t *testing.T) {
 	}
 }
 
+func TestIfAuthdataSurvivesReconnect(t *testing.T) {
+	// This test case ensures authentication data is being resubmited after
+	// reconnect.
+	testNode := "/auth-testnode"
+
+	ts, err := StartTestCluster(1, nil, logWriter{t: t, p: "[ZKERR] "})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	zk, _, err := ts.ConnectAll()
+	if err != nil {
+		t.Fatalf("Connect returned error: %+v", err)
+	}
+	defer zk.Close()
+
+	acl := DigestACL(PermAll, "userfoo", "passbar")
+
+	_, err = zk.Create(testNode, []byte("Some very secret content"), 0, acl)
+	if err != nil && err != ErrNodeExists {
+		t.Fatalf("Failed to create test node : %+v", err)
+	}
+
+	_, _, err = zk.Get(testNode)
+	if err == nil || err != ErrNoAuth {
+		var msg string
+
+		if err == nil {
+			msg = "Fetching data without auth should have resulted in an error"
+		} else {
+			msg = fmt.Sprintf("Expecting ErrNoAuth, got `%+v` instead", err)
+		}
+		t.Fatalf(msg)
+	}
+
+	zk.AddAuth("digest", []byte("userfoo:passbar"))
+
+	_, _, err = zk.Get(testNode)
+	if err != nil {
+		t.Fatalf("Fetching data with auth failed: %+v", err)
+	}
+
+	ts.StopAllServers()
+	ts.StartAllServers()
+
+	_, _, err = zk.Get(testNode)
+	if err != nil {
+		t.Fatalf("Fetching data after reconnect failed: %+v", err)
+	}
+}
+
 func TestMultiFailures(t *testing.T) {
 	// This test case ensures that we return the errors associated with each
 	// opeThis in the event a call to Multi() fails.
