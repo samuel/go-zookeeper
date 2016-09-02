@@ -100,6 +100,8 @@ type Conn struct {
 	reconnectDelay time.Duration
 
 	logger Logger
+
+	buf []byte
 }
 
 // connOption represents a connection option.
@@ -195,6 +197,7 @@ func Connect(servers []string, sessionTimeout time.Duration, options ...connOpti
 		watchers:       make(map[watchPathType][]chan Event),
 		passwd:         emptyPassword,
 		logger:         DefaultLogger,
+		buf:            make([]byte, bufferSize),
 
 		// Debug
 		reconnectDelay: 0,
@@ -601,16 +604,14 @@ func (c *Conn) authenticate() error {
 }
 
 func (c *Conn) sendData(req *request) error {
-	buf := make([]byte, bufferSize)
-
 	header := &requestHeader{req.xid, req.opcode}
-	n, err := encodePacket(buf[4:], header)
+	n, err := encodePacket(c.buf[4:], header)
 	if err != nil {
 		req.recvChan <- response{-1, err}
 		return nil
 	}
 
-	n2, err := encodePacket(buf[4+n:], req.pkt)
+	n2, err := encodePacket(c.buf[4+n:], req.pkt)
 	if err != nil {
 		req.recvChan <- response{-1, err}
 		return nil
@@ -618,7 +619,7 @@ func (c *Conn) sendData(req *request) error {
 
 	n += n2
 
-	binary.BigEndian.PutUint32(buf[:4], uint32(n))
+	binary.BigEndian.PutUint32(c.buf[:4], uint32(n))
 
 	c.requestsLock.Lock()
 	select {
@@ -632,7 +633,7 @@ func (c *Conn) sendData(req *request) error {
 	c.requestsLock.Unlock()
 
 	c.conn.SetWriteDeadline(time.Now().Add(c.recvTimeout))
-	_, err = c.conn.Write(buf[:n+4])
+	_, err = c.conn.Write(c.buf[:n+4])
 	c.conn.SetWriteDeadline(time.Time{})
 	if err != nil {
 		req.recvChan <- response{-1, err}
@@ -647,7 +648,6 @@ func (c *Conn) sendLoop() error {
 	pingTicker := time.NewTicker(c.pingInterval)
 	defer pingTicker.Stop()
 
-	buf := make([]byte, bufferSize)
 	for {
 		select {
 		case req := <-c.sendChan:
@@ -655,15 +655,15 @@ func (c *Conn) sendLoop() error {
 				return err
 			}
 		case <-pingTicker.C:
-			n, err := encodePacket(buf[4:], &requestHeader{Xid: -2, Opcode: opPing})
+			n, err := encodePacket(c.buf[4:], &requestHeader{Xid: -2, Opcode: opPing})
 			if err != nil {
 				panic("zk: opPing should never fail to serialize")
 			}
 
-			binary.BigEndian.PutUint32(buf[:4], uint32(n))
+			binary.BigEndian.PutUint32(c.buf[:4], uint32(n))
 
 			c.conn.SetWriteDeadline(time.Now().Add(c.recvTimeout))
-			_, err = c.conn.Write(buf[:n+4])
+			_, err = c.conn.Write(c.buf[:n+4])
 			c.conn.SetWriteDeadline(time.Time{})
 			if err != nil {
 				c.conn.Close()
