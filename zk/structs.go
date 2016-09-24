@@ -136,6 +136,11 @@ type statResponse struct {
 	Stat Stat
 }
 
+type create2Response struct {
+	Path string
+	Stat Stat
+}
+
 //
 
 type CheckVersionRequest PathVersionRequest
@@ -357,6 +362,10 @@ func (r *multiResponse) Decode(buf []byte) (int, error) {
 		case opSetData:
 			res.Stat = new(Stat)
 			w = reflect.ValueOf(res.Stat)
+		case opCreate2:
+			w = reflect.ValueOf(&res.String)
+			res.Stat = new(Stat)
+			w = reflect.ValueOf(res.Stat)
 		case opCheck, opDelete:
 		}
 		if w.IsValid() {
@@ -574,7 +583,7 @@ func requestStructForOp(op int32) interface{} {
 	switch op {
 	case opClose:
 		return &closeRequest{}
-	case opCreate:
+	case opCreate, opCreate2:
 		return &CreateRequest{}
 	case opDelete:
 		return &DeleteRequest{}
