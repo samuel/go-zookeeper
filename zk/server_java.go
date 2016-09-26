@@ -94,7 +94,10 @@ var jarSearchPaths = []string{
 func findZookeeperFatJar() string {
 	var paths []string
 	zkPath := os.Getenv("ZOOKEEPER_PATH")
-	if zkPath == "" {
+	zkJarPath := os.Getenv("ZOOKEEPER_JARPATH")
+	if zkJarPath != "" {
+		paths = []string{zkJarPath}
+	} else if zkPath == "" {
 		paths = jarSearchPaths
 	} else {
 		paths = []string{filepath.Join(zkPath, "contrib/fatjar/zookeeper-*-fatjar.jar")}
