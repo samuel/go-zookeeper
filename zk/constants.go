@@ -2,6 +2,7 @@ package zk
 
 import (
 	"errors"
+	"fmt"
 )
 
 const (
@@ -11,24 +12,33 @@ const (
 )
 
 const (
-	opNotify       = 0
-	opCreate       = 1
-	opDelete       = 2
-	opExists       = 3
-	opGetData      = 4
-	opSetData      = 5
-	opGetAcl       = 6
-	opSetAcl       = 7
-	opGetChildren  = 8
-	opSync         = 9
-	opPing         = 11
-	opGetChildren2 = 12
-	opCheck        = 13
-	opMulti        = 14
-	opClose        = -11
-	opSetAuth      = 100
-	opSetWatches   = 101
-	opError        = -1
+	opNotify          = 0
+	opCreate          = 1
+	opDelete          = 2
+	opExists          = 3
+	opGetData         = 4
+	opSetData         = 5
+	opGetAcl          = 6
+	opSetAcl          = 7
+	opGetChildren     = 8
+	opSync            = 9
+	opPing            = 11
+	opGetChildren2    = 12
+	opCheck           = 13
+	opMulti           = 14
+	opCreate2         = 15
+	opReconfig        = 16
+	opCheckWatches    = 17
+	opRemoveWatches   = 18
+	opCreateContainer = 19
+	opDeleteContainer = 20
+	opSetAuth         = 100
+	opSetWatches      = 101
+	sasl              = 102
+	opCreateSession   = -10
+	opClose           = -11
+	opCloseSession    = -11
+	opError           = -1
 	// Not in protocol, used internally
 	opWatcherEvent = -2
 )
@@ -111,8 +121,12 @@ var (
 	ErrInvalidACL              = errors.New("zk: invalid ACL specified")
 	ErrAuthFailed              = errors.New("zk: client authentication failed")
 	ErrClosing                 = errors.New("zk: zookeeper is closing")
-	ErrNothing                 = errors.New("zk: no server responsees to process")
+	ErrNothing                 = errors.New("zk: no server responses to process")
 	ErrSessionMoved            = errors.New("zk: session moved to another server, so operation is ignored")
+	ErrNotReadOnly             = errors.New("zk: write operation on read-only session")
+	ErrEphemeralOnLocalSession = errors.New("zk: ephemeral on local session")
+	ErrNoWatcher               = errors.New("zk: no such watcher")
+	ErrUnimplemented           = errors.New("zk: unimplemented")
 
 	// ErrInvalidCallback         = errors.New("zk: invalid callback specified")
 	errCodeToError = map[ErrCode]error{
@@ -126,11 +140,15 @@ var (
 		errNotEmpty:                ErrNotEmpty,
 		errSessionExpired:          ErrSessionExpired,
 		// errInvalidCallback:         ErrInvalidCallback,
-		errInvalidAcl:   ErrInvalidACL,
-		errAuthFailed:   ErrAuthFailed,
-		errClosing:      ErrClosing,
-		errNothing:      ErrNothing,
-		errSessionMoved: ErrSessionMoved,
+		errInvalidAcl:              ErrInvalidACL,
+		errAuthFailed:              ErrAuthFailed,
+		errClosing:                 ErrClosing,
+		errNothing:                 ErrNothing,
+		errSessionMoved:            ErrSessionMoved,
+		errNoWatcher:               ErrNoWatcher,
+		errEphemeralOnLocalSession: ErrEphemeralOnLocalSession,
+		errNotReadOnly:             ErrNotReadOnly,
+		errUnimplemented:           ErrUnimplemented,
 	}
 )
 
@@ -138,7 +156,7 @@ func (e ErrCode) toError() error {
 	if err, ok := errCodeToError[e]; ok {
 		return err
 	}
-	return ErrUnknown
+	return fmt.Errorf("%v: %v", ErrUnknown, e)
 }
 
 const (
@@ -168,6 +186,9 @@ const (
 	errClosing                 ErrCode = -116
 	errNothing                 ErrCode = -117
 	errSessionMoved            ErrCode = -118
+	errNotReadOnly             ErrCode = -119
+	errEphemeralOnLocalSession ErrCode = -120
+	errNoWatcher               ErrCode = -121
 )
 
 // Constants for ACL permissions
