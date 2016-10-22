@@ -8,8 +8,8 @@ import (
 func TestEncodeDecodePacket(t *testing.T) {
 	t.Parallel()
 	encodeDecodeTest(t, &requestHeader{-2, 5})
-	encodeDecodeTest(t, &connectResponse{1, 2, 3, nil})
-	encodeDecodeTest(t, &connectResponse{1, 2, 3, []byte{4, 5, 6}})
+	encodeDecodeTest(t, &connectResponse{1, 2, 3, nil, false})
+	encodeDecodeTest(t, &connectResponse{1, 2, 3, []byte{4, 5, 6}, true})
 	encodeDecodeTest(t, &getAclResponse{[]ACL{{12, "s", "anyone"}}, Stat{}})
 	encodeDecodeTest(t, &getChildrenResponse{[]string{"foo", "bar"}})
 	encodeDecodeTest(t, &pathWatchRequest{"path", true})

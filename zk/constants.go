@@ -98,6 +98,10 @@ var (
 
 type State int32
 
+func (s State) IsConnected() bool {
+	return s == StateConnectedReadOnly || s == StateHasSession
+}
+
 func (s State) String() string {
 	if name := stateNames[s]; name != "" {
 		return name

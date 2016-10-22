@@ -85,6 +85,7 @@ type Conn struct {
 	pingInterval   time.Duration
 	recvTimeout    time.Duration
 	connectTimeout time.Duration
+	allowReadOnly  bool
 
 	creds   []authCreds
 	credsMu sync.Mutex // protects server
@@ -234,6 +235,13 @@ func WithDialer(dialer Dialer) connOption {
 func WithHostProvider(hostProvider HostProvider) connOption {
 	return func(c *Conn) {
 		c.hostProvider = hostProvider
+	}
+}
+
+// Returns a connection option allowing the session to become read-only..
+func AllowReadOnly(b bool) connOption {
+	return func(c *Conn) {
+		c.allowReadOnly = b
 	}
 }
 
@@ -404,7 +412,7 @@ func (c *Conn) loop() {
 			c.logger.Printf("Authentication failed: %s", err)
 			c.conn.Close()
 		case err == nil:
-			c.logger.Printf("Authenticated: id=%d, timeout=%d", c.SessionID(), c.sessionTimeoutMs)
+			c.logger.Printf("Authenticated: id=0x%X, timeout=%d", c.SessionID(), c.sessionTimeoutMs)
 			c.hostProvider.Connected()        // mark success
 			c.closeChan = make(chan struct{}) // channel to tell send loop stop
 			reauthChan := make(chan struct{}) // channel to tell send loop that authdata has been resubmitted
@@ -550,6 +558,7 @@ func (c *Conn) authenticate() error {
 		TimeOut:         c.sessionTimeoutMs,
 		SessionID:       c.SessionID(),
 		Passwd:          c.passwd,
+		ReadOnly:        c.allowReadOnly,
 	})
 	if err != nil {
 		return err
@@ -598,7 +607,13 @@ func (c *Conn) authenticate() error {
 	atomic.StoreInt64(&c.sessionID, r.SessionID)
 	c.setTimeouts(r.TimeOut)
 	c.passwd = r.Passwd
-	c.setState(StateHasSession)
+	if r.ReadOnly {
+		c.setState(StateConnectedReadOnly)
+	} else {
+		// FIXME(msolo) This doesn't make much sense and has no analog in
+		// any other client (Java, C)
+		c.setState(StateHasSession)
+	}
 
 	return nil
 }
