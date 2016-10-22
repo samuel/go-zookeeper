@@ -35,10 +35,10 @@ var ErrInvalidPath = errors.New("zk: invalid path")
 var DefaultLogger Logger = defaultLogger{}
 
 const (
-	bufferSize      = 1536 * 1024
-	eventChanSize   = 6
-	sendChanSize    = 16
-	protectedPrefix = "_c_"
+	defaultBufferSize = 1024 * 1024 // By default, anything larger than 1MB will be rejected by zookeeper.
+	eventChanSize     = 6
+	sendChanSize      = 16
+	protectedPrefix   = "_c_"
 )
 
 type watchType int
@@ -102,7 +102,8 @@ type Conn struct {
 
 	logger Logger
 
-	buf []byte
+	bufferSize int
+	buf        []byte
 }
 
 // connOption represents a connection option.
@@ -186,19 +187,18 @@ func Connect(servers []string, sessionTimeout time.Duration, options ...connOpti
 
 	ec := make(chan Event, eventChanSize)
 	conn := &Conn{
-		dialer:         net.DialTimeout,
-		hostProvider:   &DNSHostProvider{},
-		conn:           nil,
-		state:          StateDisconnected,
-		eventChan:      ec,
-		shouldQuit:     make(chan struct{}),
-		connectTimeout: 1 * time.Second,
-		sendChan:       make(chan *request, sendChanSize),
-		requests:       make(map[int32]*request),
-		watchers:       make(map[watchPathType][]chan Event),
-		passwd:         emptyPassword,
-		logger:         DefaultLogger,
-		buf:            make([]byte, bufferSize),
+		dialer:       net.DialTimeout,
+		hostProvider: &DNSHostProvider{},
+		conn:         nil,
+		state:        StateDisconnected,
+		eventChan:    ec,
+		shouldQuit:   make(chan struct{}),
+		sendChan:     make(chan *request, sendChanSize),
+		requests:     make(map[int32]*request),
+		watchers:     make(map[watchPathType][]chan Event),
+		passwd:       emptyPassword,
+		logger:       DefaultLogger,
+		bufferSize:   defaultBufferSize,
 
 		// Debug
 		reconnectDelay: 0,
@@ -208,6 +208,8 @@ func Connect(servers []string, sessionTimeout time.Duration, options ...connOpti
 	for _, option := range options {
 		option(conn)
 	}
+
+	conn.buf = make([]byte, conn.bufferSize)
 
 	if err := conn.hostProvider.Init(srvs); err != nil {
 		return nil, nil, err
@@ -228,6 +230,13 @@ func Connect(servers []string, sessionTimeout time.Duration, options ...connOpti
 func WithDialer(dialer Dialer) connOption {
 	return func(c *Conn) {
 		c.dialer = dialer
+	}
+}
+
+// WithBufferSize returns a connection option specifying an explicit buffer size.
+func WithBufferSize(size int) connOption {
+	return func(c *Conn) {
+		c.bufferSize = size
 	}
 }
 
@@ -282,9 +291,15 @@ func (c *Conn) SetLogger(l Logger) {
 	c.logger = l
 }
 
+const (
+	maxPingSendInterval = 10 * time.Second
+	minPingSendInteravl = 1 * time.Second
+)
+
 func (c *Conn) setTimeouts(sessionTimeoutMs int32) {
 	c.sessionTimeoutMs = sessionTimeoutMs
 	sessionTimeout := time.Duration(sessionTimeoutMs) * time.Millisecond
+	c.connectTimeout = sessionTimeout / time.Duration(c.hostProvider.Len())
 	c.recvTimeout = sessionTimeout * 2 / 3
 	c.pingInterval = c.recvTimeout / 2
 }
@@ -343,9 +358,10 @@ func (c *Conn) resendZkAuth(reauthReadyChan chan struct{}) {
 
 	defer close(reauthReadyChan)
 
-	c.logger.Printf("Re-submitting `%d` credentials after reconnect",
-		len(c.creds))
-
+	if len(c.creds) > 0 {
+		c.logger.Printf("Re-submitting %d credentials id=0x%x after reconnect",
+			c.SessionID(), len(c.creds))
+	}
 	for _, cred := range c.creds {
 		resChan, err := c.sendRequest(
 			opSetAuth,
@@ -406,13 +422,13 @@ func (c *Conn) loop() {
 		err := c.authenticate()
 		switch {
 		case err == ErrSessionExpired:
-			c.logger.Printf("Authentication failed: %s", err)
+			c.logger.Printf("Authentication id=0x%x failed: %s", c.SessionID(), err)
 			c.invalidateWatches(err)
 		case err != nil && c.conn != nil:
-			c.logger.Printf("Authentication failed: %s", err)
+			c.logger.Printf("Authentication id=0x%x failed: %s", c.SessionID(), err)
 			c.conn.Close()
 		case err == nil:
-			c.logger.Printf("Authenticated: id=0x%X, timeout=%d", c.SessionID(), c.sessionTimeoutMs)
+			c.logger.Printf("Authenticated: id=0x%x, timeout=%d", c.SessionID(), c.sessionTimeoutMs)
 			c.hostProvider.Connected()        // mark success
 			c.closeChan = make(chan struct{}) // channel to tell send loop stop
 			reauthChan := make(chan struct{}) // channel to tell send loop that authdata has been resubmitted
@@ -422,7 +438,7 @@ func (c *Conn) loop() {
 			go func() {
 				<-reauthChan
 				err := c.sendLoop()
-				c.logger.Printf("Send loop terminated: err=%v", err)
+				c.logger.Printf("Send loop id=0x%x terminated: err=%v", c.SessionID(), err)
 				c.conn.Close() // causes recv loop to EOF/exit
 				wg.Done()
 			}()
@@ -430,7 +446,7 @@ func (c *Conn) loop() {
 			wg.Add(1)
 			go func() {
 				err := c.recvLoop(c.conn)
-				c.logger.Printf("Recv loop terminated: err=%v", err)
+				c.logger.Printf("Recv loop id=0x%x terminated: err=%v", c.SessionID(), err)
 				if err == nil {
 					panic("zk: recvLoop should never return nil error")
 				}
@@ -454,6 +470,7 @@ func (c *Conn) loop() {
 		}
 
 		if err != ErrSessionExpired {
+			c.logger.Printf("Fake conn closed id=0x%x : err=%v", c.SessionID(), err)
 			err = ErrConnectionClosed
 		}
 		c.flushRequests(err)
@@ -691,7 +708,7 @@ func (c *Conn) sendLoop() error {
 }
 
 func (c *Conn) recvLoop(conn net.Conn) error {
-	buf := make([]byte, bufferSize)
+	buf := make([]byte, c.bufferSize)
 	for {
 		// package length
 		conn.SetReadDeadline(time.Now().Add(c.recvTimeout))
