@@ -719,7 +719,9 @@ func (c *Conn) recvLoop(conn net.Conn) error {
 			switch res.Type {
 			case EventNodeCreated:
 				wTypes = append(wTypes, watchTypeExist)
-			case EventNodeDeleted, EventNodeDataChanged:
+			case EventNodeDataChanged:
+				wTypes = append(wTypes, watchTypeExist, watchTypeData)
+			case EventNodeDeleted:
 				wTypes = append(wTypes, watchTypeExist, watchTypeData, watchTypeChild)
 			case EventNodeChildrenChanged:
 				wTypes = append(wTypes, watchTypeChild)
