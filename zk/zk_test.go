@@ -716,3 +716,57 @@ func startSlowProxy(t *testing.T, up, down Rate, upstream string, adj func(ln *L
 	}()
 	return ln.Addr().String(), stopCh, nil
 }
+
+func TestNodeDataChange(t *testing.T) {
+	ts, err := StartTestCluster(1, nil, logWriter{t: t, p: "[ZKERR] "})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ts.Stop()
+	zk, _, err := ts.ConnectAll()
+	if err != nil {
+		t.Fatalf("Connect returned error: %+v", err)
+	}
+	defer zk.Close()
+
+	testPath, err := zk.Create("/gozk-test-1", []byte{}, 0, WorldACL(PermAll))
+	if err != nil {
+		t.Fatalf("Create returned: %+v", err)
+	}
+
+	_, _, childCh, err := zk.ChildrenW(testPath)
+	if err != nil {
+		t.Fatalf("Children returned error: %+v", err)
+	}
+
+	_, _, getCh, err := zk.GetW(testPath)
+	if err != nil {
+		t.Fatalf("Children returned error: %+v", err)
+	}
+
+	_, err = zk.Set(testPath, []byte("test"), -1)
+	if err != nil {
+		t.Fatalf("Set test path error: %+v", err)
+	}
+
+	select {
+	case ev := <-getCh:
+		if ev.Err != nil {
+			t.Fatalf("GetW watcher error %+v", ev.Err)
+		}
+		if ev.Path != testPath {
+			t.Fatalf("GetW watcher wrong path %s instead of %s", ev.Path, testPath)
+		}
+		if ev.Type != EventNodeDataChanged {
+			t.Fatalf("GetW watcher wrong event %s instead of %s", ev.Type, EventNodeDataChanged)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("GetW watcher timed out")
+	}
+
+	select {
+	case ev := <-childCh:
+		t.Fatalf("ChildrenW return wrong event: %+v", ev)
+	case <-time.After(2 * time.Second):
+	}
+}
