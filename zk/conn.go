@@ -54,6 +54,11 @@ type watchPathType struct {
 	wType watchType
 }
 
+type watchChannel struct {
+	channel chan Event
+	closeOnNotify bool
+}
+
 type Dialer func(network, address string, timeout time.Duration) (net.Conn, error)
 
 // Logger is an interface that can be implemented to provide custom log output.
@@ -92,7 +97,7 @@ type Conn struct {
 	sendChan     chan *request
 	requests     map[int32]*request // Xid -> pending request
 	requestsLock sync.Mutex
-	watchers     map[watchPathType][]chan Event
+	watchers     map[watchPathType][]watchChannel
 	watchersLock sync.Mutex
 	closeChan    chan struct{} // channel to tell send loop stop
 
@@ -194,7 +199,7 @@ func Connect(servers []string, sessionTimeout time.Duration, options ...connOpti
 		connectTimeout: 1 * time.Second,
 		sendChan:       make(chan *request, sendChanSize),
 		requests:       make(map[int32]*request),
-		watchers:       make(map[watchPathType][]chan Event),
+		watchers:       make(map[watchPathType][]watchChannel),
 		passwd:         emptyPassword,
 		logger:         DefaultLogger,
 		buf:            make([]byte, bufferSize),
@@ -489,12 +494,14 @@ func (c *Conn) invalidateWatches(err error) {
 	if len(c.watchers) >= 0 {
 		for pathType, watchers := range c.watchers {
 			ev := Event{Type: EventNotWatching, State: StateDisconnected, Path: pathType.path, Err: err}
-			for _, ch := range watchers {
-				ch <- ev
-				close(ch)
+			for _, w := range watchers {
+				w.channel <- ev
+				if w.closeOnNotify {
+					close(w.channel)
+				}
 			}
 		}
-		c.watchers = make(map[watchPathType][]chan Event)
+		c.watchers = make(map[watchPathType][]watchChannel)
 	}
 }
 
@@ -724,13 +731,21 @@ func (c *Conn) recvLoop(conn net.Conn) error {
 			case EventNodeChildrenChanged:
 				wTypes = append(wTypes, watchTypeChild)
 			}
+			channelsNotified := make(map[chan Event]bool)
 			c.watchersLock.Lock()
 			for _, t := range wTypes {
 				wpt := watchPathType{res.Path, t}
 				if watchers := c.watchers[wpt]; watchers != nil && len(watchers) > 0 {
-					for _, ch := range watchers {
-						ch <- ev
-						close(ch)
+					for _, w := range watchers {
+						if !channelsNotified[w.channel] {
+							w.channel <- ev
+							if w.closeOnNotify {
+								close(w.channel)
+							} else {
+								channelsNotified[w.channel] = true
+							}
+
+						}
 					}
 					delete(c.watchers, wpt)
 				}
@@ -776,14 +791,19 @@ func (c *Conn) nextXid() int32 {
 	return int32(atomic.AddUint32(&c.xid, 1) & 0x7fffffff)
 }
 
-func (c *Conn) addWatcher(path string, watchType watchType) <-chan Event {
+func (c *Conn) addWatcher(path string, watchType watchType, channel chan Event) <-chan Event {
 	c.watchersLock.Lock()
 	defer c.watchersLock.Unlock()
 
-	ch := make(chan Event, 1)
+	var w watchChannel
+	if channel == nil {
+		w = watchChannel{make(chan Event, 1), true}
+	} else {
+		w = watchChannel{channel, false}
+	}
 	wpt := watchPathType{path, watchType}
-	c.watchers[wpt] = append(c.watchers[wpt], ch)
-	return ch
+	c.watchers[wpt] = append(c.watchers[wpt], w)
+	return w.channel
 }
 
 func (c *Conn) queueRequest(opcode int32, req interface{}, res interface{}, recvFunc func(*request, *responseHeader, error)) <-chan response {
@@ -836,12 +856,28 @@ func (c *Conn) Children(path string) ([]string, *Stat, error) {
 	return res.Children, &res.Stat, err
 }
 
+// ChildrenW returns the names of a znode's children and sets a watch. The returned channel is
+// used to receive watch events.
 func (c *Conn) ChildrenW(path string) ([]string, *Stat, <-chan Event, error) {
+	return c.childrenW(path, nil)
+}
+
+// ChildrenWChannel returns the names of a znode's children and sets a watch that will trigger
+// via the given channel.
+func (c *Conn) ChildrenWChannel(path string, watchChannel chan Event) ([]string, *Stat, error) {
+	if watchChannel == nil {
+		panic("zk: given watch channel is nil!")
+	}
+	children, stat, _, err := c.childrenW(path, watchChannel)
+	return children, stat, err
+}
+
+func (c *Conn) childrenW(path string, watchChannel chan Event) ([]string, *Stat, <-chan Event, error) {
 	var ech <-chan Event
 	res := &getChildren2Response{}
 	_, err := c.request(opGetChildren2, &getChildren2Request{Path: path, Watch: true}, res, func(req *request, res *responseHeader, err error) {
 		if err == nil {
-			ech = c.addWatcher(path, watchTypeChild)
+			ech = c.addWatcher(path, watchTypeChild, watchChannel)
 		}
 	})
 	if err != nil {
@@ -856,13 +892,28 @@ func (c *Conn) Get(path string) ([]byte, *Stat, error) {
 	return res.Data, &res.Stat, err
 }
 
-// GetW returns the contents of a znode and sets a watch
+// GetW returns the contents of a znode and sets a watch. The returned channel is used to
+// receive watch events.
 func (c *Conn) GetW(path string) ([]byte, *Stat, <-chan Event, error) {
+	return c.getW(path, nil)
+}
+
+// GetWChannel returns the contents of a znode and sets a watch that will trigger via the
+// given channel.
+func (c *Conn) GetWChannel(path string, watchChannel chan Event) ([]byte, *Stat, error) {
+	if watchChannel == nil {
+		panic("zk: GetWithChannel does not accept a nil channel")
+	}
+	data, stat, _, err := c.getW(path, watchChannel)
+	return data, stat, err
+}
+
+func (c *Conn) getW(path string, watchChannel chan Event) ([]byte, *Stat, <-chan Event, error) {
 	var ech <-chan Event
 	res := &getDataResponse{}
 	_, err := c.request(opGetData, &getDataRequest{Path: path, Watch: true}, res, func(req *request, res *responseHeader, err error) {
 		if err == nil {
-			ech = c.addWatcher(path, watchTypeData)
+			ech = c.addWatcher(path, watchTypeData, watchChannel)
 		}
 	})
 	if err != nil {
@@ -947,14 +998,30 @@ func (c *Conn) Exists(path string) (bool, *Stat, error) {
 	return exists, &res.Stat, err
 }
 
+// ExistsW returns whether the given path exists and sets a watch. The returned channel is used to
+// receive watch events.
 func (c *Conn) ExistsW(path string) (bool, *Stat, <-chan Event, error) {
+	return c.existsW(path, nil)
+}
+
+// ExistsWChannel returns whether the given path exists and sets a watch that will trigger via
+// the given channel.
+func (c *Conn) ExistsWChannel(path string, watchChannel chan Event) (bool, *Stat, error) {
+	if watchChannel == nil {
+		panic("zk: ExistsWithChannel does not accept a nil channel")
+	}
+	exists, stat, _, err := c.existsW(path, watchChannel)
+	return exists, stat, err
+}
+
+func (c *Conn) existsW(path string, watchChannel chan Event) (bool, *Stat, <-chan Event, error) {
 	var ech <-chan Event
 	res := &existsResponse{}
 	_, err := c.request(opExists, &existsRequest{Path: path, Watch: true}, res, func(req *request, res *responseHeader, err error) {
 		if err == nil {
-			ech = c.addWatcher(path, watchTypeData)
+			ech = c.addWatcher(path, watchTypeData, watchChannel)
 		} else if err == ErrNoNode {
-			ech = c.addWatcher(path, watchTypeExist)
+			ech = c.addWatcher(path, watchTypeExist, watchChannel)
 		}
 	})
 	exists := true
