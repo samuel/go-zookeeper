@@ -423,6 +423,7 @@ func TestChildWatch(t *testing.T) {
 	case _ = <-time.After(time.Second * 2):
 		t.Fatal("Child watcher timed out")
 	}
+	ensureClosed(t, childCh);
 
 	// Delete of the watched node should trigger the watch
 
@@ -520,6 +521,7 @@ func TestSetWatchers(t *testing.T) {
 	case <-time.After(2 * time.Second):
 		t.Fatal("GetW watcher timed out")
 	}
+	ensureClosed(t, testEvCh);
 
 	select {
 	case ev := <-childCh:
@@ -532,6 +534,7 @@ func TestSetWatchers(t *testing.T) {
 	case <-time.After(2 * time.Second):
 		t.Fatal("Child watcher timed out")
 	}
+	ensureClosed(t, childCh);
 }
 
 func TestExpiringWatch(t *testing.T) {
@@ -716,3 +719,146 @@ func startSlowProxy(t *testing.T, up, down Rate, upstream string, adj func(ln *L
 	}()
 	return ln.Addr().String(), stopCh, nil
 }
+
+func ensureClosed(t *testing.T, channel <-chan Event) {
+	select {
+	case _, ok := <-channel:
+		if !ok {
+			// channel closed, as expected
+			return
+		}
+	default:
+	}
+	t.Fatal("Watch channel should have been closed")
+}
+
+func TestReuseWatchChannel(t *testing.T) {
+	ts, err := StartTestCluster(1, nil, logWriter{t: t, p: "[ZKERR] "})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ts.Stop()
+	zk, _, err := ts.ConnectAll()
+	if err != nil {
+		t.Fatalf("Connect returned error: %+v", err)
+	}
+	defer zk.Close()
+
+	if err = zk.Delete("/gozk-test", -1); err != nil && err != ErrNoNode {
+		t.Fatalf("Delete returned error: %+v", err)
+	}
+
+	channel := make(chan Event, 100)
+	exists, _, err := zk.ExistsWChannel("/gozk-test", channel)
+	if err != nil {
+		t.Fatalf("ExistsWChannel returned error: %+v", err)
+	} else if exists {
+		t.Fatal("ExistsWChannel indicates /gozk-test exists when it should not")
+	}
+
+	// re-use the channel
+	if _, _, err = zk.ChildrenWChannel("/", channel); err != nil {
+		t.Fatalf("ChildrenWChannel returned error: %+v", err)
+	}
+
+	// no activity yet
+	select {
+	case <- channel:
+		t.Fatal("Watch should not have triggered yet")
+	default:
+	}
+
+	if _, err = zk.Create("/gozk-test", nil, 0, WorldACL(PermAll)); err != nil {
+		t.Fatalf("Create returned error: %+v", err)
+	}
+
+	// we'll get two events on the same channel for this action
+	select {
+	case ev := <- channel:
+		if ev.Path != "/gozk-test" || ev.Type != EventNodeCreated {
+			t.Errorf("Expecting EventNodeCreated for /gozk_test. Instead got %s for %s",
+				ev.Type, ev.Path)
+		}
+	case <- time.After(time.Second * 2):
+		t.Fatal("Create failed to trigger watch")
+	}
+
+	select {
+	case ev := <- channel:
+		if ev.Path != "/" || ev.Type != EventNodeChildrenChanged {
+			t.Errorf("Expecting EventNodeChildrenChanged for /. Instead got %s for %s",
+				ev.Type, ev.Path)
+		}
+	case <- time.After(time.Second * 2):
+		t.Fatal("Create failed to trigger watch")
+	}
+}
+
+func TestSkipRedundantNoticesToReusedWatchChannel(t *testing.T) {
+	ts, err := StartTestCluster(1, nil, logWriter{t: t, p: "[ZKERR] "})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ts.Stop()
+	zk, _, err := ts.ConnectAll()
+	if err != nil {
+		t.Fatalf("Connect returned error: %+v", err)
+	}
+	defer zk.Close()
+
+	// ensure this node is created with expected data and ACLs
+	if err = zk.Delete("/gozk-test", -1); err != nil && err != ErrNoNode {
+		t.Fatalf("Delete returned error: %+v", err)
+	}
+	if _, err = zk.Create("/gozk-test", nil, 0, WorldACL(PermAll)); err != nil {
+		t.Fatalf("Create returned error: %+v", err)
+	}
+
+	// we have two watches going to the same channel
+	channel := make(chan Event, 100)
+	if _, _, err = zk.GetWChannel("/gozk-test", channel); err != nil {
+		t.Fatalf("GetWChannel returned error: %+v", err)
+	}
+	if _, _, err = zk.ChildrenWChannel("/gozk-test", channel); err != nil {
+		t.Fatalf("ChildrenWChannel returned error: %+v", err)
+	}
+
+	// when we delete the node, it should result in a single event instead of two (e.g. we don't
+	// want an event for the GetW watch and a redundant and identical event for ChildrenW)
+	if err = zk.Delete("/gozk-test", -1); err != nil {
+		t.Fatalf("Delete returned error: %+v", err)
+	}
+
+	select {
+	case ev := <- channel:
+		if ev.Path != "/gozk-test" || ev.Type != EventNodeDeleted {
+			t.Errorf("Expecting EventNodeDeleted for /gozk_test. Instead got %s for %s",
+				ev.Type, ev.Path)
+		}
+	case <- time.After(time.Second * 2):
+		t.Fatal("Delete failed to trigger watch")
+	}
+
+	// To verify there are no more events waiting, we could try to read from the channel
+	// and make sure it times out, but that will just slow down the test by whatever our
+	// timeout duration is. Instead, just trigger another event and make sure we see it next
+	// (vs. seeing a redundant event for the above action next).
+
+	if _, _, err = zk.ChildrenWChannel("/", channel); err != nil {
+		t.Fatalf("ChildrenWChannel returned error: %+v", err)
+	}
+	if _, err = zk.Create("/gozk-test", nil, 0, WorldACL(PermAll)); err != nil {
+		t.Fatalf("Create returned error: %+v", err)
+	}
+
+	select {
+	case ev := <- channel:
+		if ev.Path != "/" || ev.Type != EventNodeChildrenChanged {
+			t.Errorf("Expecting EventNodeChildrenChanged for /. Instead got %s for %s",
+				ev.Type, ev.Path)
+		}
+	case <- time.After(time.Second * 2):
+		t.Fatal("Delete failed to trigger watch")
+	}
+}
+
