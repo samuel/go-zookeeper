@@ -82,10 +82,14 @@ type Conn struct {
 	eventChan      chan Event
 	eventCallback  EventCallback // may be nil
 	shouldQuit     chan struct{}
+	closeErrMu     sync.Mutex // protects closeErr
+	closeErr       error
 	pingInterval   time.Duration
 	recvTimeout    time.Duration
 	connectTimeout time.Duration
 	allowReadOnly  bool
+
+	closeOnSessionExpiration bool
 
 	creds   []authCreds
 	credsMu sync.Mutex // protects server
@@ -254,6 +258,13 @@ func AllowReadOnly(b bool) connOption {
 	}
 }
 
+// Returns a connection option which will be closed on session expiration.
+func CloseOnSessionExpiration(b bool) connOption {
+	return func(c *Conn) {
+		c.closeOnSessionExpiration = b
+	}
+}
+
 // EventCallback is a function that is called when an Event occurs.
 type EventCallback func(Event)
 
@@ -266,13 +277,37 @@ func WithEventCallback(cb EventCallback) connOption {
 	}
 }
 
+func (c *Conn) closeWithError(err error) {
+	c.closeErrMu.Lock()
+	if c.closeErr != nil {
+		// Conn is already closed.
+		c.closeErrMu.Unlock()
+		return
+	}
+	c.closeErr = err
+	c.closeErrMu.Unlock()
+
+	close(c.sendChan)
+	c.flushUnsentRequests(err)
+}
+
 func (c *Conn) Close() {
 	close(c.shouldQuit)
 
+	respChan := make(chan response, 1)
+
+	// queueRequest is a blocking method, so call it concurrently.
+	go func() {
+		resp := <-c.queueRequest(opClose, &closeRequest{}, &closeResponse{}, nil)
+		respChan <- resp
+	}()
+
 	select {
-	case <-c.queueRequest(opClose, &closeRequest{}, &closeResponse{}, nil):
+	case <-respChan:
 	case <-time.After(time.Second):
 	}
+
+	c.closeWithError(ErrClosing)
 }
 
 // State returns the current state of the connection.
@@ -475,6 +510,11 @@ func (c *Conn) loop() {
 		}
 		c.flushRequests(err)
 
+		if err == ErrSessionExpired && c.closeOnSessionExpiration {
+			c.closeWithError(ErrSessionExpired)
+			return
+		}
+
 		if c.reconnectDelay > 0 {
 			select {
 			case <-c.shouldQuit:
@@ -490,7 +530,10 @@ func (c *Conn) flushUnsentRequests(err error) {
 		select {
 		default:
 			return
-		case req := <-c.sendChan:
+		case req, ok := <-c.sendChan:
+			if !ok {
+				return
+			}
 			req.recvChan <- response{-1, err}
 		}
 	}
@@ -682,7 +725,13 @@ func (c *Conn) sendLoop() error {
 
 	for {
 		select {
-		case req := <-c.sendChan:
+		case req, ok := <-c.sendChan:
+			if !ok {
+				_ = c.conn.Close()
+				c.closeErrMu.Lock()
+				defer c.closeErrMu.Unlock()
+				return c.closeErr
+			}
 			if err := c.sendData(req); err != nil {
 				return err
 			}
@@ -818,7 +867,7 @@ func (c *Conn) addWatcher(path string, watchType watchType) <-chan Event {
 	return ch
 }
 
-func (c *Conn) queueRequest(opcode int32, req interface{}, res interface{}, recvFunc func(*request, *responseHeader, error)) <-chan response {
+func (c *Conn) queueRequest(opcode int32, req interface{}, res interface{}, recvFunc func(*request, *responseHeader, error)) (recvChan <-chan response) {
 	rq := &request{
 		xid:        c.nextXid(),
 		opcode:     opcode,
@@ -827,8 +876,18 @@ func (c *Conn) queueRequest(opcode int32, req interface{}, res interface{}, recv
 		recvChan:   make(chan response, 1),
 		recvFunc:   recvFunc,
 	}
+	recvChan = rq.recvChan
+	defer func() {
+		if r := recover(); r != nil {
+			// sendChan was closed.
+			c.closeErrMu.Lock()
+			closeErr := c.closeErr
+			c.closeErrMu.Unlock()
+			rq.recvChan <- response{zxid: -1, err: closeErr}
+		}
+	}()
 	c.sendChan <- rq
-	return rq.recvChan
+	return recvChan
 }
 
 func (c *Conn) request(opcode int32, req interface{}, res interface{}, recvFunc func(*request, *responseHeader, error)) (int64, error) {

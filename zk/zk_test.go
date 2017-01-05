@@ -7,6 +7,7 @@ import (
 	"io"
 	"net"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -601,6 +602,51 @@ func TestExpiringWatch(t *testing.T) {
 		}
 	case <-time.After(2 * time.Second):
 		t.Fatal("Child watcher timed out")
+	}
+}
+
+func TestDisconnectOnSessionExpiration(t *testing.T) {
+	// This test case ensures that client doesn't reconnect on session expiration.
+	testNode := "/expiration-testnode"
+
+	ts, err := StartTestCluster(1, nil, logWriter{t: t, p: "[ZKERR] "})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ts.Stop()
+
+	zk, eventChan, err := ts.ConnectWithOptions(15*time.Second, CloseOnSessionExpiration(true))
+	if err != nil {
+		t.Fatalf("Connect returned error: %+v", err)
+	}
+	defer zk.Close()
+
+	_, err = zk.Create(testNode, nil, 0, WorldACL(PermAll))
+	if err != nil && err != ErrNodeExists {
+		t.Fatalf("Failed to create test node : %+v", err)
+	}
+
+	_, _, err = zk.Get(testNode)
+	if err != nil {
+		t.Fatalf("Fetching data with auth failed: %+v", err)
+	}
+
+	atomic.StoreInt64(&zk.sessionID, 999999)
+
+	// Force reconnection.
+	zk.conn.Close()
+
+	// Wait for event for session expiration.
+	for {
+		event := <-eventChan
+		if event.State == StateExpired {
+			break
+		}
+	}
+
+	_, _, err = zk.Get(testNode)
+	if err != ErrSessionExpired {
+		t.Fatalf("Client did reconnect: %+v", err)
 	}
 }
 
