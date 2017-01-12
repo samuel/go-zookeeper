@@ -82,8 +82,9 @@ type Conn struct {
 	eventChan      chan Event
 	eventCallback  EventCallback // may be nil
 	shouldQuit     chan struct{}
-	closeErrMu     sync.Mutex // protects closeErr
+	closeMu        sync.Mutex // protects closeErr and closeWg
 	closeErr       error
+	closeWg        sync.WaitGroup // tracks pending attempts to write to sendChan
 	pingInterval   time.Duration
 	recvTimeout    time.Duration
 	connectTimeout time.Duration
@@ -278,17 +279,36 @@ func WithEventCallback(cb EventCallback) connOption {
 }
 
 func (c *Conn) closeWithError(err error) {
-	c.closeErrMu.Lock()
+	// Ensure that closeErr is set only once.
+	c.closeMu.Lock()
 	if c.closeErr != nil {
 		// Conn is already closed.
-		c.closeErrMu.Unlock()
+		c.closeMu.Unlock()
 		return
 	}
 	c.closeErr = err
-	c.closeErrMu.Unlock()
+	c.closeMu.Unlock()
 
-	close(c.sendChan)
-	c.flushUnsentRequests(err)
+	stopChan := make(chan struct{})
+
+	go func() {
+		// Periodically flush the sendChan until closeWg detects
+		// that there are no more inflight attempts by queueRequest.
+		for {
+			c.flushUnsentRequests(err)
+
+			select {
+			case <-time.After(10 * time.Millisecond):
+			case <-stopChan:
+				return
+			}
+		}
+	}()
+
+	// closeWg is called after setting closeErr to avoid possible races
+	// with concurrent closeWg.Add calls.
+	c.closeWg.Wait()
+	close(stopChan)
 }
 
 func (c *Conn) Close() {
@@ -530,10 +550,7 @@ func (c *Conn) flushUnsentRequests(err error) {
 		select {
 		default:
 			return
-		case req, ok := <-c.sendChan:
-			if !ok {
-				return
-			}
+		case req := <-c.sendChan:
 			req.recvChan <- response{-1, err}
 		}
 	}
@@ -725,13 +742,7 @@ func (c *Conn) sendLoop() error {
 	// TODO(msolo) a regular send should take the place of ping.
 	for {
 		select {
-		case req, ok := <-c.sendChan:
-			if !ok {
-				_ = c.conn.Close()
-				c.closeErrMu.Lock()
-				defer c.closeErrMu.Unlock()
-				return c.closeErr
-			}
+		case req := <-c.sendChan:
 			if err := c.sendData(req); err != nil {
 				return err
 			}
@@ -867,7 +878,7 @@ func (c *Conn) addWatcher(path string, watchType watchType) <-chan Event {
 	return ch
 }
 
-func (c *Conn) queueRequest(opcode int32, req interface{}, res interface{}, recvFunc func(*request, *responseHeader, error)) (recvChan <-chan response) {
+func (c *Conn) queueRequest(opcode int32, req interface{}, res interface{}, recvFunc func(*request, *responseHeader, error)) <-chan response {
 	rq := &request{
 		xid:        c.nextXid(),
 		opcode:     opcode,
@@ -876,18 +887,29 @@ func (c *Conn) queueRequest(opcode int32, req interface{}, res interface{}, recv
 		recvChan:   make(chan response, 1),
 		recvFunc:   recvFunc,
 	}
-	recvChan = rq.recvChan
-	defer func() {
-		if r := recover(); r != nil {
-			// sendChan was closed.
-			c.closeErrMu.Lock()
-			closeErr := c.closeErr
-			c.closeErrMu.Unlock()
-			rq.recvChan <- response{zxid: -1, err: closeErr}
-		}
-	}()
-	c.sendChan <- rq
-	return recvChan
+
+	// Atomically check closeErr and add element to closeWg.
+	// This is necessary to ensure that we never add to closeWg
+	// after setting non-nil error to avoid race with Wait call.
+	//
+	// It allows closeWithError to determine that there are goroutines
+	// inflight between closeMu.Unlock and attempt to put data into
+	// sendChan.
+	c.closeMu.Lock()
+	closeErr := c.closeErr
+	if closeErr == nil {
+		c.closeWg.Add(1)
+		defer c.closeWg.Done()
+	}
+	c.closeMu.Unlock()
+
+	if closeErr != nil {
+		rq.recvChan <- response{zxid: -1, err: closeErr}
+	} else {
+		c.sendChan <- rq
+	}
+
+	return rq.recvChan
 }
 
 func (c *Conn) request(opcode int32, req interface{}, res interface{}, recvFunc func(*request, *responseHeader, error)) (int64, error) {
