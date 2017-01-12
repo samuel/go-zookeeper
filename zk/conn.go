@@ -463,7 +463,7 @@ func (c *Conn) loop() {
 			c.logger.Printf("Authentication id=0x%x failed: %s", c.SessionID(), err)
 			c.conn.Close()
 		case err == nil:
-			c.logger.Printf("Authenticated: id=0x%x, timeout=%v", c.SessionID(), c.SessionTimeout())
+			c.logger.Printf("Authenticated: id=0x%x, timeout=%v", c.SessionID(), c.sessionTimeoutMs)
 			c.hostProvider.Connected()        // mark success
 			c.closeChan = make(chan struct{}) // channel to tell send loop stop
 			reauthChan := make(chan struct{}) // channel to tell send loop that authdata has been resubmitted
