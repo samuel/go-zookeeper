@@ -575,6 +575,49 @@ func TestExpiringWatch(t *testing.T) {
 	}
 }
 
+func TestChroot(t *testing.T) {
+	ts, err := StartTestCluster(1, nil, logWriter{t: t, p: "[ZKERR] "})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ts.Stop()
+	zk, _, err := ts.ConnectAll()
+	if err != nil {
+		t.Fatalf("Connect returned error: %+v", err)
+	}
+	defer zk.Close()
+
+	path := "/gozk-test-chroot"
+	err = zk.Chroot(path)
+	if err == nil {
+		t.Fatal("Chroot expect error when path is not exist")
+	}
+	_, err = zk.Create(path, []byte{1, 2, 3, 4}, 0, WorldACL(PermAll))
+	if err != nil {
+		t.Fatalf("Chroot create path error, %s", err.Error())
+	}
+	err = zk.Chroot(path)
+	if err != nil {
+		t.Fatalf("Chroot error, %s", err.Error())
+	}
+	subPath := "/abc"
+	actualPath, err := zk.Create(subPath, []byte{1, 2, 3, 4}, 0, WorldACL(PermAll))
+	if err != nil {
+		t.Fatalf("Chroot create path error, %s", err.Error())
+	}
+	if actualPath != subPath {
+		t.Fatalf("path expect %s, got %s", path+subPath, actualPath)
+	}
+	err = zk.Chroot("")
+	if err != nil {
+		t.Fatalf("Chroot error, %s", err.Error())
+	}
+	exists, _, err := zk.Exists(path + subPath)
+	if !exists || err != nil {
+		t.Fatal("Chroot error as node exists")
+	}
+}
+
 func TestRequestFail(t *testing.T) {
 	// If connecting fails to all servers in the list then pending requests
 	// should be errored out so they don't hang forever.
