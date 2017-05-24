@@ -407,11 +407,9 @@ func (c *Conn) connect() error {
 	}
 }
 
-func (c *Conn) resendZkAuth(reauthReadyChan chan struct{}) {
+func (c *Conn) resendZkAuth() error {
 	c.credsMu.Lock()
 	defer c.credsMu.Unlock()
-
-	defer close(reauthReadyChan)
 
 	if len(c.creds) > 0 {
 		c.logger.Printf("Re-submitting %d credentials id=0x%x after reconnect",
@@ -429,17 +427,22 @@ func (c *Conn) resendZkAuth(reauthReadyChan chan struct{}) {
 
 		if err != nil {
 			c.logger.Printf("Call to sendRequest failed during credential resubmit: %s", err)
-			// FIXME(prozlach): lets ignore errors for now
-			continue
+			return err
 		}
 
-		res := <-resChan
-		if res.err != nil {
-			c.logger.Printf("Credential re-submit failed: %s", res.err)
-			// FIXME(prozlach): lets ignore errors for now
-			continue
+		select {
+		case res := <-resChan:
+			if res.err != nil {
+				c.logger.Printf("Credential re-submit failed: %s", res.err)
+				return res.err
+			}
+		case <-c.closeChan:
+			c.logger.Printf("Credential re-submit failed: %s", ErrConnectionClosed)
+			return ErrConnectionClosed
 		}
 	}
+
+	return nil
 }
 
 func (c *Conn) sendRequest(
@@ -486,14 +489,16 @@ func (c *Conn) loop() {
 			c.logger.Printf("Authenticated: id=0x%x, timeout=%v", c.SessionID(), c.sessionTimeoutMs)
 			c.hostProvider.Connected()        // mark success
 			c.closeChan = make(chan struct{}) // channel to tell send loop stop
-			reauthChan := make(chan struct{}) // channel to tell send loop that authdata has been resubmitted
+			reauthChan := make(chan error)    // channel to tell send loop that authdata has been resubmitted
 
 			var wg sync.WaitGroup
 			wg.Add(1)
 			go func() {
-				<-reauthChan
-				err := c.sendLoop()
-				c.logger.Printf("Send loop id=0x%x terminated: err=%v", c.SessionID(), err)
+				sendErr := <-reauthChan
+				if sendErr == nil {
+					sendErr = c.sendLoop()
+				}
+				c.logger.Printf("Send loop id=0x%x terminated: err=%v", c.SessionID(), sendErr)
 				c.conn.Close() // causes recv loop to EOF/exit
 				wg.Done()
 			}()
@@ -509,7 +514,7 @@ func (c *Conn) loop() {
 				wg.Done()
 			}()
 
-			c.resendZkAuth(reauthChan)
+			reauthChan <- c.resendZkAuth()
 
 			c.sendSetWatches()
 			wg.Wait()
