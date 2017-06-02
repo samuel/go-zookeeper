@@ -35,10 +35,10 @@ var ErrInvalidPath = errors.New("zk: invalid path")
 var DefaultLogger Logger = defaultLogger{}
 
 const (
-	bufferSize      = 1536 * 1024
-	eventChanSize   = 6
-	sendChanSize    = 16
-	protectedPrefix = "_c_"
+	defaultBufferSize = 1024 * 1024 // By default, anything larger than 1MB will be rejected by zookeeper.
+	eventChanSize     = 6
+	sendChanSize      = 16
+	protectedPrefix   = "_c_"
 )
 
 type watchType int
@@ -82,9 +82,15 @@ type Conn struct {
 	eventChan      chan Event
 	eventCallback  EventCallback // may be nil
 	shouldQuit     chan struct{}
+	closeMu        sync.Mutex // protects closeErr and closeWg
+	closeErr       error
+	closeWg        sync.WaitGroup // tracks pending attempts to write to sendChan
 	pingInterval   time.Duration
 	recvTimeout    time.Duration
 	connectTimeout time.Duration
+	allowReadOnly  bool
+
+	closeOnSessionExpiration bool
 
 	creds   []authCreds
 	credsMu sync.Mutex // protects server
@@ -101,7 +107,8 @@ type Conn struct {
 
 	logger Logger
 
-	buf []byte
+	bufferSize int
+	buf        []byte
 }
 
 // connOption represents a connection option.
@@ -185,19 +192,18 @@ func Connect(servers []string, sessionTimeout time.Duration, options ...connOpti
 
 	ec := make(chan Event, eventChanSize)
 	conn := &Conn{
-		dialer:         net.DialTimeout,
-		hostProvider:   &DNSHostProvider{},
-		conn:           nil,
-		state:          StateDisconnected,
-		eventChan:      ec,
-		shouldQuit:     make(chan struct{}),
-		connectTimeout: 1 * time.Second,
-		sendChan:       make(chan *request, sendChanSize),
-		requests:       make(map[int32]*request),
-		watchers:       make(map[watchPathType][]chan Event),
-		passwd:         emptyPassword,
-		logger:         DefaultLogger,
-		buf:            make([]byte, bufferSize),
+		dialer:       net.DialTimeout,
+		hostProvider: &DNSHostProvider{},
+		conn:         nil,
+		state:        StateDisconnected,
+		eventChan:    ec,
+		shouldQuit:   make(chan struct{}),
+		sendChan:     make(chan *request, sendChanSize),
+		requests:     make(map[int32]*request),
+		watchers:     make(map[watchPathType][]chan Event),
+		passwd:       emptyPassword,
+		logger:       DefaultLogger,
+		bufferSize:   defaultBufferSize,
 
 		// Debug
 		reconnectDelay: 0,
@@ -207,6 +213,8 @@ func Connect(servers []string, sessionTimeout time.Duration, options ...connOpti
 	for _, option := range options {
 		option(conn)
 	}
+
+	conn.buf = make([]byte, conn.bufferSize)
 
 	if err := conn.hostProvider.Init(srvs); err != nil {
 		return nil, nil, err
@@ -230,10 +238,31 @@ func WithDialer(dialer Dialer) connOption {
 	}
 }
 
+// WithBufferSize returns a connection option specifying an explicit buffer size.
+func WithBufferSize(size int) connOption {
+	return func(c *Conn) {
+		c.bufferSize = size
+	}
+}
+
 // WithHostProvider returns a connection option specifying a non-default HostProvider.
 func WithHostProvider(hostProvider HostProvider) connOption {
 	return func(c *Conn) {
 		c.hostProvider = hostProvider
+	}
+}
+
+// Returns a connection option allowing the session to become read-only..
+func AllowReadOnly(b bool) connOption {
+	return func(c *Conn) {
+		c.allowReadOnly = b
+	}
+}
+
+// Returns a connection option which will be closed on session expiration.
+func CloseOnSessionExpiration(b bool) connOption {
+	return func(c *Conn) {
+		c.closeOnSessionExpiration = b
 	}
 }
 
@@ -249,13 +278,56 @@ func WithEventCallback(cb EventCallback) connOption {
 	}
 }
 
+func (c *Conn) closeWithError(err error) {
+	// Ensure that closeErr is set only once.
+	c.closeMu.Lock()
+	if c.closeErr != nil {
+		// Conn is already closed.
+		c.closeMu.Unlock()
+		return
+	}
+	c.closeErr = err
+	c.closeMu.Unlock()
+
+	stopChan := make(chan struct{})
+
+	go func() {
+		// Periodically flush the sendChan until closeWg detects
+		// that there are no more inflight attempts by queueRequest.
+		for {
+			c.flushUnsentRequests(err)
+
+			select {
+			case <-time.After(10 * time.Millisecond):
+			case <-stopChan:
+				return
+			}
+		}
+	}()
+
+	// closeWg is called after setting closeErr to avoid possible races
+	// with concurrent closeWg.Add calls.
+	c.closeWg.Wait()
+	close(stopChan)
+}
+
 func (c *Conn) Close() {
 	close(c.shouldQuit)
 
+	respChan := make(chan response, 1)
+
+	// queueRequest is a blocking method, so call it concurrently.
+	go func() {
+		resp := <-c.queueRequest(opClose, &closeRequest{}, &closeResponse{}, nil)
+		respChan <- resp
+	}()
+
 	select {
-	case <-c.queueRequest(opClose, &closeRequest{}, &closeResponse{}, nil):
+	case <-respChan:
 	case <-time.After(time.Second):
 	}
+
+	c.closeWithError(ErrClosing)
 }
 
 // State returns the current state of the connection.
@@ -274,9 +346,15 @@ func (c *Conn) SetLogger(l Logger) {
 	c.logger = l
 }
 
+const (
+	maxPingSendInterval = 10 * time.Second
+	minPingSendInteravl = 1 * time.Second
+)
+
 func (c *Conn) setTimeouts(sessionTimeoutMs int32) {
 	c.sessionTimeoutMs = sessionTimeoutMs
 	sessionTimeout := time.Duration(sessionTimeoutMs) * time.Millisecond
+	c.connectTimeout = sessionTimeout / time.Duration(c.hostProvider.Len())
 	c.recvTimeout = sessionTimeout * 2 / 3
 	c.pingInterval = c.recvTimeout / 2
 }
@@ -329,15 +407,14 @@ func (c *Conn) connect() error {
 	}
 }
 
-func (c *Conn) resendZkAuth(reauthReadyChan chan struct{}) {
+func (c *Conn) resendZkAuth() error {
 	c.credsMu.Lock()
 	defer c.credsMu.Unlock()
 
-	defer close(reauthReadyChan)
-
-	c.logger.Printf("Re-submitting `%d` credentials after reconnect",
-		len(c.creds))
-
+	if len(c.creds) > 0 {
+		c.logger.Printf("Re-submitting %d credentials id=0x%x after reconnect",
+			c.SessionID(), len(c.creds))
+	}
 	for _, cred := range c.creds {
 		resChan, err := c.sendRequest(
 			opSetAuth,
@@ -350,17 +427,22 @@ func (c *Conn) resendZkAuth(reauthReadyChan chan struct{}) {
 
 		if err != nil {
 			c.logger.Printf("Call to sendRequest failed during credential resubmit: %s", err)
-			// FIXME(prozlach): lets ignore errors for now
-			continue
+			return err
 		}
 
-		res := <-resChan
-		if res.err != nil {
-			c.logger.Printf("Credential re-submit failed: %s", res.err)
-			// FIXME(prozlach): lets ignore errors for now
-			continue
+		select {
+		case res := <-resChan:
+			if res.err != nil {
+				c.logger.Printf("Credential re-submit failed: %s", res.err)
+				return res.err
+			}
+		case <-c.closeChan:
+			c.logger.Printf("Credential re-submit failed: %s", ErrConnectionClosed)
+			return ErrConnectionClosed
 		}
 	}
+
+	return nil
 }
 
 func (c *Conn) sendRequest(
@@ -398,23 +480,25 @@ func (c *Conn) loop() {
 		err := c.authenticate()
 		switch {
 		case err == ErrSessionExpired:
-			c.logger.Printf("Authentication failed: %s", err)
+			c.logger.Printf("Authentication id=0x%x failed: %s", c.SessionID(), err)
 			c.invalidateWatches(err)
 		case err != nil && c.conn != nil:
-			c.logger.Printf("Authentication failed: %s", err)
+			c.logger.Printf("Authentication id=0x%x failed: %s", c.SessionID(), err)
 			c.conn.Close()
 		case err == nil:
-			c.logger.Printf("Authenticated: id=%d, timeout=%d", c.SessionID(), c.sessionTimeoutMs)
+			c.logger.Printf("Authenticated: id=0x%x, timeout=%v", c.SessionID(), c.sessionTimeoutMs)
 			c.hostProvider.Connected()        // mark success
 			c.closeChan = make(chan struct{}) // channel to tell send loop stop
-			reauthChan := make(chan struct{}) // channel to tell send loop that authdata has been resubmitted
+			reauthChan := make(chan error)    // channel to tell send loop that authdata has been resubmitted
 
 			var wg sync.WaitGroup
 			wg.Add(1)
 			go func() {
-				<-reauthChan
-				err := c.sendLoop()
-				c.logger.Printf("Send loop terminated: err=%v", err)
+				sendErr := <-reauthChan
+				if sendErr == nil {
+					sendErr = c.sendLoop()
+				}
+				c.logger.Printf("Send loop id=0x%x terminated: err=%v", c.SessionID(), sendErr)
 				c.conn.Close() // causes recv loop to EOF/exit
 				wg.Done()
 			}()
@@ -422,7 +506,7 @@ func (c *Conn) loop() {
 			wg.Add(1)
 			go func() {
 				err := c.recvLoop(c.conn)
-				c.logger.Printf("Recv loop terminated: err=%v", err)
+				c.logger.Printf("Recv loop id=0x%x terminated: err=%v", c.SessionID(), err)
 				if err == nil {
 					panic("zk: recvLoop should never return nil error")
 				}
@@ -430,7 +514,7 @@ func (c *Conn) loop() {
 				wg.Done()
 			}()
 
-			c.resendZkAuth(reauthChan)
+			reauthChan <- c.resendZkAuth()
 
 			c.sendSetWatches()
 			wg.Wait()
@@ -446,9 +530,15 @@ func (c *Conn) loop() {
 		}
 
 		if err != ErrSessionExpired {
+			c.logger.Printf("Fake conn closed id=0x%x : err=%v", c.SessionID(), err)
 			err = ErrConnectionClosed
 		}
 		c.flushRequests(err)
+
+		if err == ErrSessionExpired && c.closeOnSessionExpiration {
+			c.closeWithError(ErrSessionExpired)
+			return
+		}
 
 		if c.reconnectDelay > 0 {
 			select {
@@ -550,6 +640,7 @@ func (c *Conn) authenticate() error {
 		TimeOut:         c.sessionTimeoutMs,
 		SessionID:       c.SessionID(),
 		Passwd:          c.passwd,
+		ReadOnly:        c.allowReadOnly,
 	})
 	if err != nil {
 		return err
@@ -598,7 +689,13 @@ func (c *Conn) authenticate() error {
 	atomic.StoreInt64(&c.sessionID, r.SessionID)
 	c.setTimeouts(r.TimeOut)
 	c.passwd = r.Passwd
-	c.setState(StateHasSession)
+	if r.ReadOnly {
+		c.setState(StateConnectedReadOnly)
+	} else {
+		// FIXME(msolo) This doesn't make much sense and has no analog in
+		// any other client (Java, C)
+		c.setState(StateHasSession)
+	}
 
 	return nil
 }
@@ -647,7 +744,7 @@ func (c *Conn) sendData(req *request) error {
 func (c *Conn) sendLoop() error {
 	pingTicker := time.NewTicker(c.pingInterval)
 	defer pingTicker.Stop()
-
+	// TODO(msolo) a regular send should take the place of ping.
 	for {
 		select {
 		case req := <-c.sendChan:
@@ -676,7 +773,7 @@ func (c *Conn) sendLoop() error {
 }
 
 func (c *Conn) recvLoop(conn net.Conn) error {
-	buf := make([]byte, bufferSize)
+	buf := make([]byte, c.bufferSize)
 	for {
 		// package length
 		conn.SetReadDeadline(time.Now().Add(c.recvTimeout))
@@ -795,7 +892,28 @@ func (c *Conn) queueRequest(opcode int32, req interface{}, res interface{}, recv
 		recvChan:   make(chan response, 1),
 		recvFunc:   recvFunc,
 	}
-	c.sendChan <- rq
+
+	// Atomically check closeErr and add element to closeWg.
+	// This is necessary to ensure that we never add to closeWg
+	// after setting non-nil error to avoid race with Wait call.
+	//
+	// It allows closeWithError to determine that there are goroutines
+	// inflight between closeMu.Unlock and attempt to put data into
+	// sendChan.
+	c.closeMu.Lock()
+	closeErr := c.closeErr
+	if closeErr == nil {
+		c.closeWg.Add(1)
+		defer c.closeWg.Done()
+	}
+	c.closeMu.Unlock()
+
+	if closeErr != nil {
+		rq.recvChan <- response{zxid: -1, err: closeErr}
+	} else {
+		c.sendChan <- rq
+	}
+
 	return rq.recvChan
 }
 
@@ -884,6 +1002,16 @@ func (c *Conn) Create(path string, data []byte, flags int32, acl []ACL) (string,
 	res := &createResponse{}
 	_, err := c.request(opCreate, &CreateRequest{path, data, acl, flags}, res, nil)
 	return res.Path, err
+}
+
+// Return Stat data for the created node.
+func (c *Conn) Create2(path string, data []byte, flags int32, acl []ACL) (string, *Stat, error) {
+	res := &create2Response{}
+	_, err := c.request(opCreate2, &CreateRequest{path, data, acl, flags}, res, nil)
+	if err != nil {
+		return "", nil, err
+	}
+	return res.Path, &res.Stat, err
 }
 
 // CreateProtectedEphemeralSequential fixes a race condition if the server crashes

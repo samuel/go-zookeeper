@@ -136,6 +136,11 @@ type statResponse struct {
 	Stat Stat
 }
 
+type create2Response struct {
+	Path string
+	Stat Stat
+}
+
 //
 
 type CheckVersionRequest PathVersionRequest
@@ -148,6 +153,7 @@ type connectRequest struct {
 	TimeOut         int32
 	SessionID       int64
 	Passwd          []byte
+	ReadOnly        bool
 }
 
 type connectResponse struct {
@@ -155,6 +161,7 @@ type connectResponse struct {
 	TimeOut         int32
 	SessionID       int64
 	Passwd          []byte
+	ReadOnly        bool
 }
 
 type CreateRequest struct {
@@ -355,6 +362,10 @@ func (r *multiResponse) Decode(buf []byte) (int, error) {
 		case opCreate:
 			w = reflect.ValueOf(&res.String)
 		case opSetData:
+			res.Stat = new(Stat)
+			w = reflect.ValueOf(res.Stat)
+		case opCreate2:
+			w = reflect.ValueOf(&res.String)
 			res.Stat = new(Stat)
 			w = reflect.ValueOf(res.Stat)
 		case opCheck, opDelete:
@@ -574,7 +585,7 @@ func requestStructForOp(op int32) interface{} {
 	switch op {
 	case opClose:
 		return &closeRequest{}
-	case opCreate:
+	case opCreate, opCreate2:
 		return &CreateRequest{}
 	case opDelete:
 		return &DeleteRequest{}

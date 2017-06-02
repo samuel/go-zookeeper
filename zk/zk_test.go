@@ -7,6 +7,7 @@ import (
 	"io"
 	"net"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -70,14 +71,41 @@ func TestCreate(t *testing.T) {
 	defer zk.Close()
 
 	path := "/gozk-test"
+	path2 := path + "2"
 
 	if err := zk.Delete(path, -1); err != nil && err != ErrNoNode {
 		t.Fatalf("Delete returned error: %+v", err)
 	}
+
 	if p, err := zk.Create(path, []byte{1, 2, 3, 4}, 0, WorldACL(PermAll)); err != nil {
 		t.Fatalf("Create returned error: %+v", err)
 	} else if p != path {
 		t.Fatalf("Create returned different path '%s' != '%s'", p, path)
+	}
+
+	// Zookeeper 3.5.x releases support a more fully featured create2
+	// operation that is not backward compatible. Assume any test
+	// cluster is homogenous and check only the first instance.
+	srvrStats, ok := FLWSrvr([]string{fmt.Sprintf("localhost:%v", ts.Servers[0].Port)}, 500*time.Millisecond)
+	if !ok {
+		t.Fatalf("FLWSrvr failed error: %v", srvrStats[0].Error)
+	}
+
+	if strings.HasPrefix(srvrStats[0].Version, "3.5.") {
+		if p, stat, err := zk.Create2(path2, []byte{1, 2, 3, 4}, 0, WorldACL(PermAll)); err != nil {
+			t.Fatalf("Create returned error: %+v", err)
+		} else if p != path2 {
+			t.Fatalf("Create returned different path '%s' != '%s'", p, path2)
+		} else if stat.Czxid == 0 || stat.Mzxid == 0 {
+			t.Fatalf("Create returned invalid stat czxid:0x%X mzxid:0x%X", stat.Czxid, stat.Mzxid)
+		}
+		if p, stat, err := zk.Create2(path2, nil, 0, WorldACL(PermAll)); err == nil {
+			t.Fatalf("Create should have failed with NodeExists")
+		} else if stat != nil {
+			t.Fatalf("Create should have returned nil stat on failure.")
+		} else if p != "" {
+			t.Fatalf("Create should have returned empty path on failure.")
+		}
 	}
 	if data, stat, err := zk.Get(path); err != nil {
 		t.Fatalf("Get returned error: %+v", err)
@@ -86,6 +114,7 @@ func TestCreate(t *testing.T) {
 	} else if len(data) < 4 {
 		t.Fatal("Get returned wrong size data")
 	}
+
 }
 
 func TestMulti(t *testing.T) {
@@ -134,6 +163,7 @@ func TestIfAuthdataSurvivesReconnect(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	defer ts.Stop()
 
 	zk, _, err := ts.ConnectAll()
 	if err != nil {
@@ -572,6 +602,51 @@ func TestExpiringWatch(t *testing.T) {
 		}
 	case <-time.After(2 * time.Second):
 		t.Fatal("Child watcher timed out")
+	}
+}
+
+func TestDisconnectOnSessionExpiration(t *testing.T) {
+	// This test case ensures that client doesn't reconnect on session expiration.
+	testNode := "/expiration-testnode"
+
+	ts, err := StartTestCluster(1, nil, logWriter{t: t, p: "[ZKERR] "})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ts.Stop()
+
+	zk, eventChan, err := ts.ConnectWithOptions(15*time.Second, CloseOnSessionExpiration(true))
+	if err != nil {
+		t.Fatalf("Connect returned error: %+v", err)
+	}
+	defer zk.Close()
+
+	_, err = zk.Create(testNode, nil, 0, WorldACL(PermAll))
+	if err != nil && err != ErrNodeExists {
+		t.Fatalf("Failed to create test node : %+v", err)
+	}
+
+	_, _, err = zk.Get(testNode)
+	if err != nil {
+		t.Fatalf("Fetching data with auth failed: %+v", err)
+	}
+
+	atomic.StoreInt64(&zk.sessionID, 999999)
+
+	// Force reconnection.
+	zk.conn.Close()
+
+	// Wait for event for session expiration.
+	for {
+		event := <-eventChan
+		if event.State == StateExpired {
+			break
+		}
+	}
+
+	_, _, err = zk.Get(testNode)
+	if err != ErrSessionExpired {
+		t.Fatalf("Client did reconnect: %+v", err)
 	}
 }
 
