@@ -6,7 +6,11 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"reflect"
+	"regexp"
+	"sort"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -715,4 +719,159 @@ func startSlowProxy(t *testing.T, up, down Rate, upstream string, adj func(ln *L
 		}
 	}()
 	return ln.Addr().String(), stopCh, nil
+}
+
+func TestMaxBufferSize(t *testing.T) {
+	ts, err := StartTestCluster(1, nil, logWriter{t: t, p: "[ZKERR] "})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ts.Stop()
+	// no buffer size
+	zk, _, err := ts.ConnectWithOptions(15 * time.Second)
+	var l testLogger
+	if err != nil {
+		t.Fatalf("Connect returned error: %+v", err)
+	}
+	defer zk.Close()
+	// 1k buffer size, logs to custom test logger
+	zkLimited, _, err := ts.ConnectWithOptions(15*time.Second, WithMaxBufferSize(1024), func(conn *Conn) {
+		conn.SetLogger(&l)
+	})
+	if err != nil {
+		t.Fatalf("Connect returned error: %+v", err)
+	}
+	defer zkLimited.Close()
+
+	// With small node with small number of children
+	data := []byte{101, 102, 103, 103}
+	_, err = zk.Create("/foo", data, 0, WorldACL(PermAll))
+	if err != nil {
+		t.Fatalf("Create returned error: %+v", err)
+	}
+	var children []string
+	for i := 0; i < 4; i++ {
+		childName, err := zk.Create("/foo/child", nil, FlagEphemeral|FlagSequence, WorldACL(PermAll))
+		if err != nil {
+			t.Fatalf("Create returned error: %+v", err)
+		}
+		children = append(children, childName[len("/foo/"):]) // strip parent prefix from name
+	}
+	sort.Strings(children)
+
+	// Limited client works fine
+	resultData, _, err := zkLimited.Get("/foo")
+	if err != nil {
+		t.Fatalf("Get returned error: %+v", err)
+	}
+	if !reflect.DeepEqual(resultData, data) {
+		t.Fatalf("Get returned unexpected data; expecting %+v, got %+v", data, resultData)
+	}
+	resultChildren, _, err := zkLimited.Children("/foo")
+	if err != nil {
+		t.Fatalf("Children returned error: %+v", err)
+	}
+	sort.Strings(resultChildren)
+	if !reflect.DeepEqual(resultChildren, children) {
+		t.Fatalf("Children returned unexpected names; expecting %+v, got %+v", children, resultChildren)
+	}
+
+	// With large node though...
+	data = make([]byte, 1024)
+	for i := 0; i < 1024; i++ {
+		data[i] = byte(i)
+	}
+	_, err = zk.Create("/bar", data, 0, WorldACL(PermAll))
+	if err != nil {
+		t.Fatalf("Create returned error: %+v", err)
+	}
+	_, _, err = zkLimited.Get("/bar")
+	// NB: Sadly, without actually de-serializing the too-large response packet, we can't send the
+	// right error to the corresponding outstanding request. So the request just sees ErrConnectionClosed
+	// while the log will see the actual reason the connection was closed.
+	expectErr(t, err, ErrConnectionClosed)
+	expectLogMessage(t, &l, "received packet from server with length .*, which exceeds max buffer size 1024")
+
+	// Or with large number of children...
+	totalLen := 0
+	children = nil
+	for totalLen < 1024 {
+		childName, err := zk.Create("/bar/child", nil, FlagEphemeral|FlagSequence, WorldACL(PermAll))
+		if err != nil {
+			t.Fatalf("Create returned error: %+v", err)
+		}
+		n := childName[len("/bar/"):] // strip parent prefix from name
+		children = append(children, n)
+		totalLen += len(n)
+	}
+	sort.Strings(children)
+	_, _, err = zkLimited.Children("/bar")
+	expectErr(t, err, ErrConnectionClosed)
+	expectLogMessage(t, &l, "received packet from server with length .*, which exceeds max buffer size 1024")
+
+	// Other client (without buffer size limit) can successfully query the node and its children, of course
+	resultData, _, err = zk.Get("/bar")
+	if err != nil {
+		t.Fatalf("Get returned error: %+v", err)
+	}
+	if !reflect.DeepEqual(resultData, data) {
+		t.Fatalf("Get returned unexpected data; expecting %+v, got %+v", data, resultData)
+	}
+	resultChildren, _, err = zk.Children("/bar")
+	if err != nil {
+		t.Fatalf("Children returned error: %+v", err)
+	}
+	sort.Strings(resultChildren)
+	if !reflect.DeepEqual(resultChildren, children) {
+		t.Fatalf("Children returned unexpected names; expecting %+v, got %+v", children, resultChildren)
+	}
+}
+
+func expectErr(t *testing.T, err error, expected error) {
+	if err == nil {
+		t.Fatalf("Get for node that is too large should have returned error!")
+	}
+	if err != expected {
+		t.Fatalf("Get returned wrong error; expecting ErrClosing, got %+v", err)
+	}
+}
+
+func expectLogMessage(t *testing.T, logger *testLogger, pattern string) {
+	re := regexp.MustCompile(pattern)
+	events := logger.Reset()
+	if len(events) == 0 {
+		t.Fatalf("Failed to log error; expecting message that matches pattern: %s", pattern)
+	}
+	var found []string
+	for _, e := range events {
+		if re.Match([]byte(e)) {
+			found = append(found, e)
+		}
+	}
+	if len(found) == 0 {
+		t.Fatalf("Failed to log error; expecting message that matches pattern: %s", pattern)
+	} else if len(found) > 1 {
+		t.Fatalf("Logged error redundantly %d times:\n%+v", len(found), found)
+	}
+}
+
+type testLogger struct {
+	mu     sync.Mutex
+	events []string
+}
+
+func (l *testLogger) Printf(msgFormat string, args ...interface{}) {
+	msg := fmt.Sprintf(msgFormat, args...)
+	fmt.Println(msg)
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.events = append(l.events, msg)
+}
+
+func (l *testLogger) Reset() []string {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	ret := l.events
+	l.events = nil
+	return ret
 }

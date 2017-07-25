@@ -707,7 +707,11 @@ func (c *Conn) sendLoop() error {
 }
 
 func (c *Conn) recvLoop(conn net.Conn) error {
-	buf := make([]byte, bufferSize)
+	sz := bufferSize
+	if c.maxBufferSize > 0 && sz > c.maxBufferSize {
+		sz = c.maxBufferSize
+	}
+	buf := make([]byte, sz)
 	for {
 		// package length
 		conn.SetReadDeadline(time.Now().Add(c.recvTimeout))
