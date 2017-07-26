@@ -98,7 +98,9 @@ type Conn struct {
 	closeChan    chan struct{} // channel to tell send loop stop
 
 	// Debug (used by unit tests)
-	reconnectDelay time.Duration
+	reconnectLatch   chan struct{}
+	setWatchLimit    int
+	setWatchCallback func([]*setWatchesRequest)
 
 	logger Logger
 
@@ -199,9 +201,6 @@ func Connect(servers []string, sessionTimeout time.Duration, options ...connOpti
 		passwd:         emptyPassword,
 		logger:         DefaultLogger,
 		buf:            make([]byte, bufferSize),
-
-		// Debug
-		reconnectDelay: 0,
 	}
 
 	// Set provided options.
@@ -481,11 +480,11 @@ func (c *Conn) loop() {
 		}
 		c.flushRequests(err)
 
-		if c.reconnectDelay > 0 {
+		if c.reconnectLatch != nil {
 			select {
 			case <-c.shouldQuit:
 				return
-			case <-time.After(c.reconnectDelay):
+			case <-c.reconnectLatch:
 			}
 		}
 	}
@@ -537,17 +536,41 @@ func (c *Conn) sendSetWatches() {
 		return
 	}
 
-	req := &setWatchesRequest{
-		RelativeZxid: c.lastZxid,
-		DataWatches:  make([]string, 0),
-		ExistWatches: make([]string, 0),
-		ChildWatches: make([]string, 0),
+	// NB: A ZK server, by default, rejects packets >1mb. So, if we have too
+	// many watches to reset, we need to break this up into multiple packets
+	// to avoid hitting that limit. Mirroring the Java client behavior: we are
+	// conservative in that we limit requests to 128kb (since server limit is
+	// is actually configurable and could conceivably be configured smaller
+	// than default of 1mb).
+	limit := 128 * 1024
+	if c.setWatchLimit > 0 {
+		limit = c.setWatchLimit
 	}
+
+	var reqs []*setWatchesRequest
+	var req *setWatchesRequest
+	var sizeSoFar int
+
 	n := 0
 	for pathType, watchers := range c.watchers {
 		if len(watchers) == 0 {
 			continue
 		}
+		addlLen := 4 + len(pathType.path)
+		if req == nil || sizeSoFar+addlLen > limit {
+			if req != nil {
+				// add to set of requests that we'll send
+				reqs = append(reqs, req)
+			}
+			sizeSoFar = 28 // fixed overhead of a set-watches packet
+			req = &setWatchesRequest{
+				RelativeZxid: c.lastZxid,
+				DataWatches:  make([]string, 0),
+				ExistWatches: make([]string, 0),
+				ChildWatches: make([]string, 0),
+			}
+		}
+		sizeSoFar += addlLen
 		switch pathType.wType {
 		case watchTypeData:
 			req.DataWatches = append(req.DataWatches, pathType.path)
@@ -561,12 +584,26 @@ func (c *Conn) sendSetWatches() {
 	if n == 0 {
 		return
 	}
+	if req != nil { // don't forget any trailing packet we were building
+		reqs = append(reqs, req)
+	}
+
+	if c.setWatchCallback != nil {
+		c.setWatchCallback(reqs)
+	}
 
 	go func() {
 		res := &setWatchesResponse{}
-		_, err := c.request(opSetWatches, req, res, nil)
-		if err != nil {
-			c.logger.Printf("Failed to set previous watches: %s", err.Error())
+		// TODO: Pipeline these so queue all of them up before waiting on any
+		// response. That will require some investigation to make sure there
+		// aren't failure modes where a blocking write to the channel of requests
+		// could hang indefinitely and cause this goroutine to leak...
+		for _, req := range reqs {
+			_, err := c.request(opSetWatches, req, res, nil)
+			if err != nil {
+				c.logger.Printf("Failed to set previous watches: %s", err.Error())
+				break
+			}
 		}
 	}()
 }
