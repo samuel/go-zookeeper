@@ -75,8 +75,7 @@ func TestClientClusterFailover(t *testing.T) {
 	tc.StopServer(hasSessionEvent1.Server)
 
 	// Wait for the session to be reconnected with the new leader.
-	hasSessionWatcher2.Wait(8 * time.Second)
-	if hasSessionWatcher2 == nil {
+	if hasSessionWatcher2.Wait(8*time.Second) == nil {
 		t.Fatalf("Failover failed")
 	}
 
