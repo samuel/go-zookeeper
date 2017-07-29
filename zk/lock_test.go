@@ -24,16 +24,12 @@ func TestTryLock(t *testing.T) {
 	if err := l.Unlock(); err != nil {
 		t.Fatal(err)
 	}
-	go func() {
-		// lock to create timeout
-		if err := l.Lock(); err != nil {
-			t.Fatal(err)
-		}
-		time.Sleep(time.Second * 10)
-		if err := l.Unlock(); err != nil {
-			t.Fatal(err)
-		}
-	}()
+	//
+	if err := l.Lock(); err != nil {
+		t.Fatal(err)
+	}
+	defer l.Unlock()
+	// should return timeout err since lock is not released
 	if err := l.TryLock(time.Second); err == nil {
 		t.Fatal(err)
 	}
