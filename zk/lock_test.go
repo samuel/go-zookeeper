@@ -5,6 +5,34 @@ import (
 	"time"
 )
 
+func TestTryLock(t *testing.T) {
+	ts, err := StartTestCluster(1, nil, logWriter{t: t, p: "[ZKERR] "})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ts.Stop()
+	zk, _, err := ts.ConnectAll()
+	if err != nil {
+		t.Fatalf("Connect returned error: %+v", err)
+	}
+	defer zk.Close()
+	acls := WorldACL(PermAll)
+	l := NewLock(zk, "/test", acls)
+	if err := l.TryLock(time.Second); err != nil {
+		t.Fatal(err)
+	}
+	if err := l.Unlock(); err != nil {
+		t.Fatal(err)
+	}
+	// lock to create timeout
+	if err := l.Lock(); err != nil {
+		t.Fatal(err)
+	}
+	if err := l.TryLock(time.Second); err == nil {
+		t.Fatal(err)
+	}
+}
+
 func TestLock(t *testing.T) {
 	ts, err := StartTestCluster(1, nil, logWriter{t: t, p: "[ZKERR] "})
 	if err != nil {
