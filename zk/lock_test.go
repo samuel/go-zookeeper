@@ -33,6 +33,7 @@ func TestTryLock(t *testing.T) {
 	}
 }
 
+
 func TestLock(t *testing.T) {
 	ts, err := StartTestCluster(1, nil, logWriter{t: t, p: "[ZKERR] "})
 	if err != nil {
