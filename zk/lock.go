@@ -14,7 +14,7 @@ var (
 	// ErrNotLocked is returned by Unlock when trying to release a lock that has not first be acquired.
 	ErrNotLocked = errors.New("zk: not locked")
 	// ErrTimeout is returned by Lock when trying to lock and timeout is reached before lock is acquired.
-	ErrTimeout = errors.New("zk: ErrTimeout")
+	ErrTimeout = errors.New("zk: acquire timeout")
 )
 
 // Lock is a mutual exclusion lock.
