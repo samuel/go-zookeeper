@@ -237,6 +237,13 @@ func WithHostProvider(hostProvider HostProvider) connOption {
 	}
 }
 
+// WithLogger returns a connection option specifying a non-default Logger.
+func WithLogger(logger Logger) connOption {
+	return func(c *Conn) {
+		c.logger = logger
+	}
+}
+
 // EventCallback is a function that is called when an Event occurs.
 type EventCallback func(Event)
 
