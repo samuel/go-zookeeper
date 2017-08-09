@@ -102,7 +102,8 @@ type Conn struct {
 	setWatchLimit    int
 	setWatchCallback func([]*setWatchesRequest)
 
-	logger Logger
+	logger  Logger
+	logInfo bool // true if information messages are logged; false if only errors are logged
 
 	buf []byte
 }
@@ -200,6 +201,7 @@ func Connect(servers []string, sessionTimeout time.Duration, options ...connOpti
 		watchers:       make(map[watchPathType][]chan Event),
 		passwd:         emptyPassword,
 		logger:         DefaultLogger,
+		logInfo:        true, // default is true for backwards compatability
 		buf:            make([]byte, bufferSize),
 	}
 
@@ -237,10 +239,18 @@ func WithHostProvider(hostProvider HostProvider) connOption {
 	}
 }
 
-// WithLogger returns a connection option specifying a non-default Logger.
+// WithLogger returns a connection option specifying a non-default Logger
 func WithLogger(logger Logger) connOption {
 	return func(c *Conn) {
 		c.logger = logger
+	}
+}
+
+// WithLogInfo returns a connection option specifying whether or not information messages
+// shoud be logged.
+func WithLogInfo(logInfo bool) connOption {
+	return func(c *Conn) {
+		c.logInfo = logInfo
 	}
 }
 
@@ -358,7 +368,9 @@ func (c *Conn) connect() error {
 		if err == nil {
 			c.conn = zkConn
 			c.setState(StateConnected)
-			c.logger.Printf("Connected to %s", c.Server())
+			if c.logInfo {
+				c.logger.Printf("Connected to %s", c.Server())
+			}
 			return nil
 		}
 
@@ -372,8 +384,10 @@ func (c *Conn) resendZkAuth(reauthReadyChan chan struct{}) {
 
 	defer close(reauthReadyChan)
 
-	c.logger.Printf("Re-submitting `%d` credentials after reconnect",
-		len(c.creds))
+	if c.logInfo {
+		c.logger.Printf("Re-submitting `%d` credentials after reconnect",
+			len(c.creds))
+	}
 
 	for _, cred := range c.creds {
 		resChan, err := c.sendRequest(
@@ -441,7 +455,9 @@ func (c *Conn) loop() {
 			c.logger.Printf("Authentication failed: %s", err)
 			c.conn.Close()
 		case err == nil:
-			c.logger.Printf("Authenticated: id=%d, timeout=%d", c.SessionID(), c.sessionTimeoutMs)
+			if c.logInfo {
+				c.logger.Printf("Authenticated: id=%d, timeout=%d", c.SessionID(), c.sessionTimeoutMs)
+			}
 			c.hostProvider.Connected()        // mark success
 			c.closeChan = make(chan struct{}) // channel to tell send loop stop
 			reauthChan := make(chan struct{}) // channel to tell send loop that authdata has been resubmitted
@@ -451,7 +467,9 @@ func (c *Conn) loop() {
 			go func() {
 				<-reauthChan
 				err := c.sendLoop()
-				c.logger.Printf("Send loop terminated: err=%v", err)
+				if err != nil || c.logInfo {
+					c.logger.Printf("Send loop terminated: err=%v", err)
+				}
 				c.conn.Close() // causes recv loop to EOF/exit
 				wg.Done()
 			}()
@@ -459,7 +477,9 @@ func (c *Conn) loop() {
 			wg.Add(1)
 			go func() {
 				err := c.recvLoop(c.conn)
-				c.logger.Printf("Recv loop terminated: err=%v", err)
+				if err != io.EOF || c.logInfo {
+					c.logger.Printf("Recv loop terminated: err=%v", err)
+				}
 				if err == nil {
 					panic("zk: recvLoop should never return nil error")
 				}
