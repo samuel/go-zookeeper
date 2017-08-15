@@ -55,7 +55,7 @@ func stringShuffle(s []string) {
 }
 
 // validatePath will make sure a path is valid before sending the request
-func validatePath(path string) error {
+func validatePath(path string, isSequential bool) error {
 	if path == "" {
 		return ErrInvalidPath
 	}
@@ -70,7 +70,7 @@ func validatePath(path string) error {
 		return nil
 	}
 
-	if path[n-1] == '/' {
+	if !isSequential && path[n-1] == '/' {
 		return ErrInvalidPath
 	}
 
