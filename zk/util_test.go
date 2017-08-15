@@ -16,34 +16,36 @@ func TestFormatServers(t *testing.T) {
 func TestValidatePath(t *testing.T) {
 	tt := []struct {
 		path  string
+		seq   bool
 		valid bool
 	}{
-		{"/this is / a valid/path", true},
-		{"/", true},
-		{"", false},
-		{"not/valid", false},
-		{"/ends/with/slash/", false},
-		{"/test\u0000", false},
-		{"/double//slash", false},
-		{"/single/./period", false},
-		{"/double/../period", false},
-		{"/double/..ok/period", true},
-		{"/double/alsook../period", true},
-		{"/double/period/at/end/..", false},
-		{"/name/with.period", true},
-		{"/test\u0001", false},
-		{"/test\u001f", false},
-		{"/test\u0020", true}, // first allowable
-		{"/test\u007e", true}, // last valid ascii
-		{"/test\u007f", false},
-		{"/test\u009f", false},
-		{"/test\uf8ff", false},
-		{"/test\uffef", true},
-		{"/test\ufff0", false},
+		{"/this is / a valid/path", false, true},
+		{"/", false, true},
+		{"", false, false},
+		{"not/valid", false, false},
+		{"/ends/with/slash/", false, false},
+		{"/sequential/", true, true},
+		{"/test\u0000", false, false},
+		{"/double//slash", false, false},
+		{"/single/./period", false, false},
+		{"/double/../period", false, false},
+		{"/double/..ok/period", false, true},
+		{"/double/alsook../period", false, true},
+		{"/double/period/at/end/..", false, false},
+		{"/name/with.period", false, true},
+		{"/test\u0001", false, false},
+		{"/test\u001f", false, false},
+		{"/test\u0020", false, true}, // first allowable
+		{"/test\u007e", false, true}, // last valid ascii
+		{"/test\u007f", false, false},
+		{"/test\u009f", false, false},
+		{"/test\uf8ff", false, false},
+		{"/test\uffef", false, true},
+		{"/test\ufff0", false, false},
 	}
 
 	for _, tc := range tt {
-		err := validatePath(tc.path)
+		err := validatePath(tc.path, tc.seq)
 		if (err != nil) == tc.valid {
 			t.Errorf("failed to validate path %q", tc.path)
 		}

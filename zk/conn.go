@@ -906,7 +906,7 @@ func (c *Conn) AddAuth(scheme string, auth []byte) error {
 }
 
 func (c *Conn) Children(path string) ([]string, *Stat, error) {
-	if err := validatePath(path); err != nil {
+	if err := validatePath(path, false); err != nil {
 		return nil, nil, err
 	}
 
@@ -916,7 +916,7 @@ func (c *Conn) Children(path string) ([]string, *Stat, error) {
 }
 
 func (c *Conn) ChildrenW(path string) ([]string, *Stat, <-chan Event, error) {
-	if err := validatePath(path); err != nil {
+	if err := validatePath(path, false); err != nil {
 		return nil, nil, nil, err
 	}
 
@@ -934,7 +934,7 @@ func (c *Conn) ChildrenW(path string) ([]string, *Stat, <-chan Event, error) {
 }
 
 func (c *Conn) Get(path string) ([]byte, *Stat, error) {
-	if err := validatePath(path); err != nil {
+	if err := validatePath(path, false); err != nil {
 		return nil, nil, err
 	}
 
@@ -945,7 +945,7 @@ func (c *Conn) Get(path string) ([]byte, *Stat, error) {
 
 // GetW returns the contents of a znode and sets a watch
 func (c *Conn) GetW(path string) ([]byte, *Stat, <-chan Event, error) {
-	if err := validatePath(path); err != nil {
+	if err := validatePath(path, false); err != nil {
 		return nil, nil, nil, err
 	}
 
@@ -963,7 +963,7 @@ func (c *Conn) GetW(path string) ([]byte, *Stat, <-chan Event, error) {
 }
 
 func (c *Conn) Set(path string, data []byte, version int32) (*Stat, error) {
-	if err := validatePath(path); err != nil {
+	if err := validatePath(path, false); err != nil {
 		return nil, err
 	}
 
@@ -973,7 +973,7 @@ func (c *Conn) Set(path string, data []byte, version int32) (*Stat, error) {
 }
 
 func (c *Conn) Create(path string, data []byte, flags int32, acl []ACL) (string, error) {
-	if err := validatePath(path); err != nil {
+	if err := validatePath(path, flags&FlagSequence == FlagSequence); err != nil {
 		return "", err
 	}
 
@@ -987,7 +987,7 @@ func (c *Conn) Create(path string, data []byte, flags int32, acl []ACL) (string,
 // ephemeral node still exists. Therefore, on reconnect we need to check if a node
 // with a GUID generated on create exists.
 func (c *Conn) CreateProtectedEphemeralSequential(path string, data []byte, acl []ACL) (string, error) {
-	if err := validatePath(path); err != nil {
+	if err := validatePath(path, true); err != nil {
 		return "", err
 	}
 
@@ -1032,7 +1032,7 @@ func (c *Conn) CreateProtectedEphemeralSequential(path string, data []byte, acl 
 }
 
 func (c *Conn) Delete(path string, version int32) error {
-	if err := validatePath(path); err != nil {
+	if err := validatePath(path, false); err != nil {
 		return err
 	}
 
@@ -1041,7 +1041,7 @@ func (c *Conn) Delete(path string, version int32) error {
 }
 
 func (c *Conn) Exists(path string) (bool, *Stat, error) {
-	if err := validatePath(path); err != nil {
+	if err := validatePath(path, false); err != nil {
 		return false, nil, err
 	}
 
@@ -1056,7 +1056,7 @@ func (c *Conn) Exists(path string) (bool, *Stat, error) {
 }
 
 func (c *Conn) ExistsW(path string) (bool, *Stat, <-chan Event, error) {
-	if err := validatePath(path); err != nil {
+	if err := validatePath(path, false); err != nil {
 		return false, nil, nil, err
 	}
 
@@ -1081,7 +1081,7 @@ func (c *Conn) ExistsW(path string) (bool, *Stat, <-chan Event, error) {
 }
 
 func (c *Conn) GetACL(path string) ([]ACL, *Stat, error) {
-	if err := validatePath(path); err != nil {
+	if err := validatePath(path, false); err != nil {
 		return nil, nil, err
 	}
 
@@ -1090,7 +1090,7 @@ func (c *Conn) GetACL(path string) ([]ACL, *Stat, error) {
 	return res.Acl, &res.Stat, err
 }
 func (c *Conn) SetACL(path string, acl []ACL, version int32) (*Stat, error) {
-	if err := validatePath(path); err != nil {
+	if err := validatePath(path, false); err != nil {
 		return nil, err
 	}
 
@@ -1100,7 +1100,7 @@ func (c *Conn) SetACL(path string, acl []ACL, version int32) (*Stat, error) {
 }
 
 func (c *Conn) Sync(path string) (string, error) {
-	if err := validatePath(path); err != nil {
+	if err := validatePath(path, false); err != nil {
 		return "", err
 	}
 
