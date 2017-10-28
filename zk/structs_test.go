@@ -16,6 +16,7 @@ func TestEncodeDecodePacket(t *testing.T) {
 	encodeDecodeTest(t, &pathWatchRequest{"path", false})
 	encodeDecodeTest(t, &CheckVersionRequest{"/", -1})
 	encodeDecodeTest(t, &multiRequest{Ops: []multiRequestOp{{multiHeader{opCheck, false, -1}, &CheckVersionRequest{"/", -1}}}})
+	encodeDecodeTest(t, &removeWatchesRequest{"/", WatcherTypeAny})
 }
 
 func TestRequestStructForOp(t *testing.T) {

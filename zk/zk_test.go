@@ -139,6 +139,7 @@ func TestIfAuthdataSurvivesReconnect(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	defer ts.Stop()
 
 	zk, _, err := ts.ConnectAll()
 	if err != nil {
@@ -455,6 +456,479 @@ func TestChildWatch(t *testing.T) {
 	case _ = <-time.After(time.Second * 2):
 		t.Fatal("Child watcher timed out")
 	}
+}
+
+//
+// Helpers to make the TestRemoveXXX tests more readable
+//
+
+// create a client connection
+func createZk(t *testing.T, ts *TestCluster) (*Conn, <-chan Event, error) {
+	zk, ch, err := ts.ConnectAll()
+	if err != nil && err != ErrNodeExists {
+		t.Fatalf("Connect returned error: %+v", err)
+	}
+	return zk, ch, nil
+}
+
+// create an ephemeral node
+func createNode(t *testing.T, zk *Conn, path string) error {
+	_, err := zk.Create(path, []byte{}, FlagEphemeral, WorldACL(PermAll))
+	if err != nil {
+		t.Fatalf("Create returned error: %+v", err)
+	}
+	return nil
+}
+
+// delete the node and assert that there is no error
+func deleteNode(t *testing.T, zk *Conn, path string) error {
+	err := zk.Delete(path, 0)
+	if err != nil && err != ErrNoNode {
+		t.Fatalf("Delete returned error: %+v", err)
+	}
+	return nil
+}
+
+// query the number of watchers for the given watchType
+func getNumWatches(t *testing.T, zk *Conn, watchType watchType) int {
+	count := 0
+	for wpt := range zk.watchers {
+		if wpt.wType == watchType {
+			watchers := zk.watchers[wpt]
+			count += len(watchers)
+		}
+	}
+	return count
+}
+
+// Verifies removing watchers
+func TestRemoveSingleWatcher(t *testing.T) {
+	ts, err := StartTestCluster(1, nil, logWriter{t: t, p: "[ZKERR] "})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ts.Stop()
+
+	zk1, _, _ := createZk(t, ts)
+	defer zk1.Close()
+	zk2, _, _ := createZk(t, ts)
+	defer zk2.Close()
+
+	// Start test
+	createNode(t, zk1, "/node1")
+	createNode(t, zk1, "/node2")
+
+	if _, _, _, err = zk2.ExistsW("/node1"); err != nil {
+		t.Fatalf("ExistsW returned error: %+v", err)
+	}
+	if _, _, _, err = zk2.ExistsW("/node2"); err != nil {
+		t.Fatalf("ExistsW returned error: %+v", err)
+	}
+
+	err = zk2.RemoveWatcher("/node1", WatcherTypeData, false)
+	if err != nil {
+		t.Fatalf("RemoveWatcher returned error: %+v", err)
+	}
+	if n := getNumWatches(t, zk2, watchTypeData); n != 1 {
+		t.Fatalf("Wrong number of data watchers: %d", n)
+	}
+
+	err = zk2.RemoveWatcher("/node2", WatcherTypeData, false)
+	if err != nil {
+		t.Fatalf("RemoveWatcher returned error: %+v", err)
+	}
+	if n := getNumWatches(t, zk2, watchTypeData); n != 0 {
+		t.Fatalf("Wrong number of data watchers: %d", n)
+	}
+
+	deleteNode(t, zk1, "/node1")
+	deleteNode(t, zk1, "/node2")
+}
+
+// Verifies removing watchers generates corresponding events
+// on the original watcher for each watchType.
+func TestRemoveSingleWatcherWithEvents(t *testing.T) {
+	ts, err := StartTestCluster(1, nil, logWriter{t: t, p: "[ZKERR] "})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ts.Stop()
+
+	zk1, _, _ := createZk(t, ts)
+	defer zk1.Close()
+	time.Sleep(10 * time.Millisecond)
+	zk2, _, _ := createZk(t, ts)
+	defer zk2.Close()
+
+	// Start test
+	var (
+		ch <-chan Event
+	)
+
+	createNode(t, zk1, "/node1")
+
+	// ExistsW
+	if _, _, ch, err = zk2.ExistsW("/node2"); err != nil {
+		t.Fatalf("ExistsW returned error: %+v", err)
+	}
+	go func() {
+		if err := zk2.RemoveWatcher("/node2", WatcherTypeData, false); err != nil {
+			t.Fatalf("RemoveWatcher returned error: %+v", err)
+		}
+	}()
+	select {
+	case e := <-ch:
+		if e.Type != EventNodeDataWatchRemoved {
+			t.Fatalf("RemoveWatcher sent the wrong event: %+v", e)
+		}
+	case <-time.After(500 * time.Millisecond):
+		t.Fatalf("RemoveWatcher did not send event: EventNodeDataWatchRemoved")
+	}
+
+	// GetW
+	if _, _, ch, err = zk2.GetW("/node1"); err != nil {
+		t.Fatalf("GetW returned error: %+v", err)
+	}
+	go func() {
+		if err := zk2.RemoveWatcher("/node1", WatcherTypeData, false); err != nil {
+			t.Fatalf("RemoveWatcher returned error: %+v", err)
+		}
+	}()
+	select {
+	case e := <-ch:
+		if e.Type != EventNodeDataWatchRemoved {
+			t.Fatalf("RemoveWatcher sent the wrong event: %+v", e)
+		}
+	case <-time.After(500 * time.Millisecond):
+		t.Fatalf("RemoveWatcher did not send event: EventNodeDataWatchRemoved")
+	}
+
+	// ChildrenW
+	if _, _, ch, err = zk2.ChildrenW("/node1"); err != nil {
+		t.Fatalf("ChildrenW returned error: %+v", err)
+	}
+	go func() {
+		if err := zk2.RemoveWatcher("/node1", WatcherTypeChildren, false); err != nil {
+			t.Fatalf("RemoveWatcher returned error: %+v", err)
+		}
+	}()
+	select {
+	case e := <-ch:
+		if e.Type != EventNodeChildWatchRemoved {
+			t.Fatalf("RemoveWatcher sent the wrong event: %+v", e)
+		}
+	case <-time.After(500 * time.Millisecond):
+		t.Fatalf("RemoveWatcher did not send event: EventNodeChildWatchRemoved")
+	}
+
+	// GetW and ChildrenW
+	chs := make([]<-chan Event, 2)
+	_, _, chs[0], err = zk2.GetW("/node1")
+	_, _, chs[1], err = zk2.ChildrenW("/node1")
+
+	go func() {
+		zk2.RemoveWatcher("/node1", WatcherTypeAny, false)
+	}()
+
+	go func() {
+		counter := 0
+		for {
+			select {
+			case e := <-chs[0]:
+				if e.Type == EventNodeDataWatchRemoved {
+					counter += 1
+					if counter == 2 {
+						return
+					}
+				}
+			case e := <-chs[1]:
+				if e.Type == EventNodeChildWatchRemoved {
+					counter += 1
+					if counter == 2 {
+						return
+					}
+				}
+			case <-time.After(500 * time.Millisecond):
+				t.Fatalf("RemoveWatcher did not send event: EventNodeChildWatchRemoved, EventNodeDataWatchRemoved")
+			}
+		}
+	}()
+
+	deleteNode(t, zk1, "/node1")
+}
+
+// Test verifies removing multiple data watchers
+func TestRemoveMultipleDataWatchers(t *testing.T) {
+	ts, err := StartTestCluster(1, nil, logWriter{t: t, p: "[ZKERR] "})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ts.Stop()
+
+	zk1, _, _ := createZk(t, ts)
+	defer zk1.Close()
+	zk2, _, _ := createZk(t, ts)
+	defer zk2.Close()
+
+	// Start test
+	createNode(t, zk1, "/node1")
+
+	// setup 2 watches on the same node
+	zk2.ExistsW("/node1")
+	zk2.ExistsW("/node1")
+	if n := getNumWatches(t, zk2, watchTypeData); n != 2 {
+		t.Fatalf("Wrong number of data watchers: %d", n)
+	}
+
+	zk2.RemoveWatcher("/node1", WatcherTypeData, false)
+	if n := getNumWatches(t, zk2, watchTypeData); n != 0 {
+		t.Fatalf("Wrong number of data watchers: %d", n)
+	}
+
+	deleteNode(t, zk1, "/node1")
+}
+
+// Test verifies removing multiple child watchers
+func TestRemoveMultipleChildWatchers(t *testing.T) {
+	ts, err := StartTestCluster(1, nil, logWriter{t: t, p: "[ZKERR] "})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ts.Stop()
+
+	zk1, _, _ := createZk(t, ts)
+	defer zk1.Close()
+	zk2, _, _ := createZk(t, ts)
+	defer zk2.Close()
+
+	// Start test
+	createNode(t, zk1, "/node1")
+
+	// setup 2 watches on the same node
+	zk2.ChildrenW("/node1")
+	zk2.ChildrenW("/node1")
+	if n := getNumWatches(t, zk2, watchTypeChild); n != 2 {
+		t.Fatalf("Wrong number of child watchers: %d", n)
+	}
+
+	zk2.RemoveWatcher("/node1", WatcherTypeChildren, false)
+	if n := getNumWatches(t, zk2, watchTypeChild); n != 0 {
+		t.Fatalf("Wrong number of child watchers: %d", n)
+	}
+
+	deleteNode(t, zk1, "/node1")
+}
+
+// Test verifies that removing WatcherType.Any should remove all watch types:
+// Child, Data, and Exist
+func TestRemoveAllWatchers(t *testing.T) {
+	ts, err := StartTestCluster(1, nil, logWriter{t: t, p: "[ZKERR] "})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ts.Stop()
+
+	zk1, _, _ := createZk(t, ts)
+	defer zk1.Close()
+	zk2, _, _ := createZk(t, ts)
+	defer zk2.Close()
+
+	// Start test
+	createNode(t, zk1, "/node1")
+
+	zk2.GetW("/node1")
+	zk2.GetW("/node1")
+	zk2.ExistsW("/node2")
+	zk2.ExistsW("/node2")
+	zk2.ChildrenW("/node1")
+	zk2.ChildrenW("/node1")
+
+	zk2.RemoveWatcher("/node1", WatcherTypeAny, false)
+	zk2.RemoveWatcher("/node2", WatcherTypeAny, false)
+
+	if n := getNumWatches(t, zk2, watchTypeChild); n != 0 {
+		t.Fatalf("Wrong number of child watchers: %d", n)
+	}
+	if n := getNumWatches(t, zk2, watchTypeData); n != 0 {
+		t.Fatalf("Wrong number of data watchers: %d", n)
+	}
+	if n := getNumWatches(t, zk2, watchTypeExist); n != 0 {
+		t.Fatalf("Wrong number of exist watchers: %d", n)
+	}
+
+	deleteNode(t, zk1, "/node1")
+}
+
+// Test verifies that removing WatcherType.Data should not affect
+// Child watchers.
+func TestRemoveAllDataWatchers(t *testing.T) {
+	ts, err := StartTestCluster(1, nil, logWriter{t: t, p: "[ZKERR] "})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ts.Stop()
+
+	zk1, _, _ := createZk(t, ts)
+	defer zk1.Close()
+	zk2, _, _ := createZk(t, ts)
+	defer zk2.Close()
+
+	// Start test
+	createNode(t, zk1, "/node1")
+
+	zk2.GetW("/node1")
+	zk2.GetW("/node1")
+	zk2.ExistsW("/node2")
+	zk2.ExistsW("/node2")
+	zk2.ChildrenW("/node1")
+	zk2.ChildrenW("/node1")
+
+	zk2.RemoveWatcher("/node1", WatcherTypeData, false)
+	zk2.RemoveWatcher("/node2", WatcherTypeData, false)
+
+	if n := getNumWatches(t, zk2, watchTypeChild); n != 2 {
+		t.Fatalf("Wrong number of child watchers: %d", n)
+	}
+	if n := getNumWatches(t, zk2, watchTypeData); n != 0 {
+		t.Fatalf("Wrong number of data watchers: %d", n)
+	}
+	if n := getNumWatches(t, zk2, watchTypeExist); n != 0 {
+		t.Fatalf("Wrong number of exist watchers: %d", n)
+	}
+
+	deleteNode(t, zk1, "/node1")
+}
+
+// Test verifies that removing WatcherType.Children should not affect
+// Data watchers.
+func TestRemoveAllChildWatchers(t *testing.T) {
+	ts, err := StartTestCluster(1, nil, logWriter{t: t, p: "[ZKERR] "})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ts.Stop()
+
+	zk1, _, _ := createZk(t, ts)
+	defer zk1.Close()
+	zk2, _, _ := createZk(t, ts)
+	defer zk2.Close()
+
+	// Start test
+	createNode(t, zk1, "/node1")
+
+	zk2.GetW("/node1")
+	zk2.GetW("/node1")
+	zk2.ExistsW("/node2")
+	zk2.ExistsW("/node2")
+	zk2.ChildrenW("/node1")
+	zk2.ChildrenW("/node1")
+
+	zk2.RemoveWatcher("/node1", WatcherTypeChildren, false)
+	zk2.RemoveWatcher("/node2", WatcherTypeChildren, false)
+
+	if n := getNumWatches(t, zk2, watchTypeChild); n != 0 {
+		t.Fatalf("Wrong number of child watchers: %d", n)
+	}
+	if n := getNumWatches(t, zk2, watchTypeData); n != 2 {
+		t.Fatalf("Wrong number of data watchers: %d", n)
+	}
+	if n := getNumWatches(t, zk2, watchTypeExist); n != 2 {
+		t.Fatalf("Wrong number of exist watchers: %d", n)
+	}
+
+	deleteNode(t, zk1, "/node1")
+}
+
+// Test verifies removing a watcher that does not exist
+func TestRemoveWatcherNoWatcherError(t *testing.T) {
+	ts, err := StartTestCluster(1, nil, logWriter{t: t, p: "[ZKERR] "})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ts.Stop()
+
+	zk1, _, _ := createZk(t, ts)
+	defer zk1.Close()
+	zk2, _, _ := createZk(t, ts)
+	defer zk2.Close()
+
+	// Start test
+	createNode(t, zk1, "/node1")
+
+	zk2.ChildrenW("/node1")
+
+	err = zk1.RemoveWatcher("/node1", WatcherTypeChildren, false)
+	if err == nil {
+		t.Fatalf("RemoveWatcher should return ErrNoWatcher")
+	} else {
+		if err != ErrNoWatcher {
+			t.Fatalf("RemoveWatcher should return ErrNoWatch instead of: %+v", err)
+		}
+	}
+
+	if n := getNumWatches(t, zk2, watchTypeChild); n != 1 {
+		t.Fatalf("Wrong number of child watchers: %d", n)
+	}
+
+	deleteNode(t, zk1, "/node1")
+}
+
+// Test verifies when no server connection, and local=true, watches should
+// be removed locally.
+func TestRemoveWatcherWhenNoConnection(t *testing.T) {
+	ts, err := StartTestCluster(1, nil, logWriter{t: t, p: "[ZKERR] "})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ts.Stop()
+
+	zk1, _, _ := createZk(t, ts)
+	defer zk1.Close()
+	zk2, _, _ := createZk(t, ts)
+	defer zk2.Close()
+
+	// Start test
+	createNode(t, zk1, "/node1")
+	zk2.ChildrenW("/node1")
+	zk2.ExistsW("/node2")
+
+	// simulate server disconnect
+	ts.Stop()
+
+	// local=false
+	if err = zk2.RemoveWatcher("/node1", WatcherTypeChildren, false); err == nil {
+		t.Fatalf("RemoveWatcher should return error")
+	}
+	if err != ErrNoServer {
+		t.Logf("RemoveWatcher returned unexpected error: %+v", err)
+	}
+	if n := getNumWatches(t, zk2, watchTypeChild); n != 1 {
+		t.Fatalf("Wrong number of child watchers: %d", n)
+	}
+
+	// local=true
+	if err = zk2.RemoveWatcher("/node2", WatcherTypeData, true); err == nil {
+		t.Fatalf("RemoveWatcher should return error")
+	}
+	if err != ErrNoServer {
+		t.Logf("RemoveWatcher returned unexpected error: %+v", err)
+	}
+	if n := getNumWatches(t, zk2, watchTypeChild); n != 1 {
+		t.Fatalf("Wrong number of child watchers: %d", n)
+	}
+	if n := getNumWatches(t, zk2, watchTypeExist); n != 0 {
+		t.Fatalf("Wrong number of data watchers: %d", n)
+	}
+
+	ts, err = StartTestCluster(1, nil, logWriter{t: t, p: "[ZKERR] "})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ts.Stop()
+	zk1, _, _ = createZk(t, ts)
+	defer zk1.Close()
+
+	deleteNode(t, zk1, "/node1")
 }
 
 func TestSetWatchers(t *testing.T) {

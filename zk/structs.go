@@ -112,6 +112,14 @@ type auth struct {
 	Auth   []byte
 }
 
+type WatcherType int32
+
+const (
+	WatcherTypeChildren = 1
+	WatcherTypeData     = 2
+	WatcherTypeAny      = 3
+)
+
 // Generic request structs
 
 type pathRequest struct {
@@ -251,6 +259,12 @@ type setWatchesRequest struct {
 }
 
 type setWatchesResponse struct{}
+
+type removeWatchesRequest struct {
+	Path string
+	Type WatcherType
+}
+type removeWatchesResponse struct{}
 
 type syncRequest pathRequest
 type syncResponse pathResponse
@@ -596,6 +610,8 @@ func requestStructForOp(op int32) interface{} {
 		return &SetDataRequest{}
 	case opSetWatches:
 		return &setWatchesRequest{}
+	case opRemoveWatches:
+		return &removeWatchesRequest{}
 	case opSync:
 		return &syncRequest{}
 	case opSetAuth:

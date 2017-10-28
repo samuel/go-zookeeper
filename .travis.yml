@@ -9,8 +9,10 @@ branches:
     - master
 
 before_install:
-  - wget http://apache.claz.org/zookeeper/zookeeper-3.4.6/zookeeper-3.4.6.tar.gz
+  - wget http://apache.claz.org/zookeeper/zookeeper-3.5.2-alpha/zookeeper-3.5.2-alpha.tar.gz
   - tar -zxvf zookeeper*tar.gz
+  - ant -buildfile zookeeper-3.5.2-alpha/build.xml jar compile-test
+  - ant -buildfile zookeeper-3.5.2-alpha/src/contrib/fatjar/build.xml jar
   - go get github.com/mattn/goveralls
   - go get golang.org/x/tools/cmd/cover
 

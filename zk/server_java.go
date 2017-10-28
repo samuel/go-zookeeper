@@ -86,6 +86,7 @@ func (sc ServerConfig) Marshall(w io.Writer) error {
 var jarSearchPaths = []string{
 	"zookeeper-*/contrib/fatjar/zookeeper-*-fatjar.jar",
 	"../zookeeper-*/contrib/fatjar/zookeeper-*-fatjar.jar",
+	"../zookeeper-*/build/contrib/fatjar/zookeeper-*-fatjar.jar",
 	"/usr/share/java/zookeeper-*.jar",
 	"/usr/local/zookeeper-*/contrib/fatjar/zookeeper-*-fatjar.jar",
 	"/usr/local/Cellar/zookeeper/*/libexec/contrib/fatjar/zookeeper-*-fatjar.jar",
@@ -124,7 +125,7 @@ func (srv *Server) Start() error {
 			return fmt.Errorf("zk: unable to find server jar")
 		}
 	}
-	srv.cmd = exec.Command("java", "-jar", srv.JarPath, "server", srv.ConfigPath)
+	srv.cmd = exec.Command("java", "-Dzookeeper.admin.enableServer=false", "-jar", srv.JarPath, "server", srv.ConfigPath)
 	srv.cmd.Stdout = srv.Stdout
 	srv.cmd.Stderr = srv.Stderr
 	return srv.cmd.Start()
