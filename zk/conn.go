@@ -413,7 +413,7 @@ func (c *Conn) resendZkAuth() error {
 
 	if len(c.creds) > 0 {
 		c.logger.Printf("Re-submitting %d credentials id=0x%x after reconnect",
-			c.SessionID(), len(c.creds))
+			len(c.creds), c.SessionID())
 	}
 	for _, cred := range c.creds {
 		resChan, err := c.sendRequest(
