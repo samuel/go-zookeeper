@@ -2,6 +2,9 @@ language: go
 go:
   - 1.9
 
+jdk:
+  - oraclejdk9
+
 sudo: false
 
 branches:
@@ -9,12 +12,13 @@ branches:
     - master
 
 before_install:
-  - wget http://apache.claz.org/zookeeper/zookeeper-3.4.6/zookeeper-3.4.6.tar.gz
+  - wget http://apache.cs.utah.edu/zookeeper/zookeeper-3.4.10/zookeeper-3.4.10.tar.gz
   - tar -zxvf zookeeper*tar.gz
   - go get github.com/mattn/goveralls
   - go get golang.org/x/tools/cmd/cover
 
 script:
+  - jdk_switcher use oraclejdk9
   - go build ./...
   - go fmt ./...
   - go vet ./...
