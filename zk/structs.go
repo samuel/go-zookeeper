@@ -148,6 +148,7 @@ type connectRequest struct {
 	TimeOut         int32
 	SessionID       int64
 	Passwd          []byte
+	RO              bool
 }
 
 type connectResponse struct {
@@ -155,6 +156,7 @@ type connectResponse struct {
 	TimeOut         int32
 	SessionID       int64
 	Passwd          []byte
+	RO              bool
 }
 
 type CreateRequest struct {
