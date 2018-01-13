@@ -82,6 +82,7 @@ type Conn struct {
 	eventChan      chan Event
 	eventCallback  EventCallback // may be nil
 	shouldQuit     chan struct{}
+	shouldQuitOnce sync.Once
 	pingInterval   time.Duration
 	recvTimeout    time.Duration
 	connectTimeout time.Duration
@@ -310,12 +311,14 @@ func WithMaxConnBufferSize(maxBufferSize int) connOption {
 }
 
 func (c *Conn) Close() {
-	close(c.shouldQuit)
+	c.shouldQuitOnce.Do(func() {
+		close(c.shouldQuit)
 
-	select {
-	case <-c.queueRequest(opClose, &closeRequest{}, &closeResponse{}, nil):
-	case <-time.After(time.Second):
-	}
+		select {
+		case <-c.queueRequest(opClose, &closeRequest{}, &closeResponse{}, nil):
+		case <-time.After(time.Second):
+		}
+	})
 }
 
 // State returns the current state of the connection.
@@ -939,10 +942,30 @@ func (c *Conn) queueRequest(opcode int32, req interface{}, res interface{}, recv
 		opcode:     opcode,
 		pkt:        req,
 		recvStruct: res,
-		recvChan:   make(chan response, 1),
+		recvChan:   make(chan response, 2),
 		recvFunc:   recvFunc,
 	}
-	c.sendChan <- rq
+
+	switch opcode {
+	case opClose:
+		// always attempt to send close ops.
+		c.sendChan <- rq
+	default:
+		// otherwise avoid deadlocks for dumb clients who aren't aware that
+		// the ZK connection is closed yet.
+		select {
+		case <-c.shouldQuit:
+			rq.recvChan <- response{-1, ErrConnectionClosed}
+		case c.sendChan <- rq:
+			// check for a tie
+			select {
+			case <-c.shouldQuit:
+				// maybe the caller gets this, maybe not- we tried.
+				rq.recvChan <- response{-1, ErrConnectionClosed}
+			default:
+			}
+		}
+	}
 	return rq.recvChan
 }
 
