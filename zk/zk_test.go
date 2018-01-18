@@ -93,6 +93,37 @@ func TestCreate(t *testing.T) {
 	}
 }
 
+func TestOpsAfterCloseDontDeadlock(t *testing.T) {
+	ts, err := StartTestCluster(1, nil, logWriter{t: t, p: "[ZKERR] "})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ts.Stop()
+	zk, _, err := ts.ConnectAll()
+	if err != nil {
+		t.Fatalf("Connect returned error: %+v", err)
+	}
+	zk.Close()
+
+	path := "/gozk-test"
+
+	ch := make(chan struct{})
+	go func() {
+		defer close(ch)
+		for range make([]struct{}, 30) {
+			if _, err := zk.Create(path, []byte{1, 2, 3, 4}, 0, WorldACL(PermAll)); err == nil {
+				t.Fatal("Create did not return error")
+			}
+		}
+	}()
+	select {
+	case <-ch:
+		// expected
+	case <-time.After(10 * time.Second):
+		t.Fatal("ZK connection deadlocked when executing ops after a Close operation")
+	}
+}
+
 func TestMulti(t *testing.T) {
 	ts, err := StartTestCluster(1, nil, logWriter{t: t, p: "[ZKERR] "})
 	if err != nil {
@@ -665,6 +696,16 @@ func TestRequestFail(t *testing.T) {
 	case <-time.After(time.Second * 2):
 		t.Fatal("Get hung when connection could not be made")
 	}
+}
+
+func TestIdempotentClose(t *testing.T) {
+	zk, _, err := Connect([]string{"127.0.0.1:32444"}, time.Second*15)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// multiple calls to Close() should not panic
+	zk.Close()
+	zk.Close()
 }
 
 func TestSlowServer(t *testing.T) {
