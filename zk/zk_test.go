@@ -139,6 +139,7 @@ func TestIfAuthdataSurvivesReconnect(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	defer ts.Stop()
 
 	zk, _, err := ts.ConnectAll()
 	if err != nil {
