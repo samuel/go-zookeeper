@@ -1,39 +1,35 @@
 package zk
 
 import (
+	"context"
 	"io/ioutil"
 	"testing"
 	"time"
 )
 
 func TestRecurringReAuthHang(t *testing.T) {
-	t.Skip("Race condition in test")
-
-	sessionTimeout := 2 * time.Second
-
-	finish := make(chan struct{})
-	defer close(finish)
-	go func() {
-		select {
-		case <-finish:
-			return
-		case <-time.After(5 * sessionTimeout):
-			panic("expected not hang")
-		}
-	}()
-
-	zkC, err := StartTestCluster(2, ioutil.Discard, ioutil.Discard)
+	zkC, err := StartTestCluster(3, ioutil.Discard, ioutil.Discard)
 	if err != nil {
-		panic(err)
+		t.Fatal(err)
 	}
 	defer zkC.Stop()
 
 	conn, evtC, err := zkC.ConnectAll()
 	if err != nil {
-		panic(err)
+		t.Fatal(err)
 	}
+
+	ctx, cancel := context.WithDeadline(
+		context.Background(), time.Now().Add(5*time.Second))
+	defer cancel()
 	for conn.State() != StateHasSession {
 		time.Sleep(50 * time.Millisecond)
+
+		select {
+		case <-ctx.Done():
+			t.Fatal("Failed to connect to ZK")
+		default:
+		}
 	}
 
 	go func() {
@@ -42,16 +38,28 @@ func TestRecurringReAuthHang(t *testing.T) {
 	}()
 
 	// Add auth.
-	conn.AddAuth("digest", []byte("test:test"))
+	conn.credsMu.Lock()
+	conn.creds = append(conn.creds, authCreds{"digest", []byte("test:test")})
+	conn.credsMu.Unlock()
 
 	currentServer := conn.Server()
-	conn.debugCloseRecvLoop = true
-	conn.debugReauthDone = make(chan struct{})
+	conn.setDebugCloseRecvLoop(true)
 	zkC.StopServer(currentServer)
+
 	// wait connect to new zookeeper.
+	ctx, cancel = context.WithDeadline(
+		context.Background(), time.Now().Add(5*time.Second))
+	defer cancel()
 	for conn.Server() == currentServer && conn.State() != StateHasSession {
 		time.Sleep(100 * time.Millisecond)
+
+		select {
+		case <-ctx.Done():
+			t.Fatal("Failed to reconnect ZK next server")
+		default:
+		}
 	}
 
 	<-conn.debugReauthDone
+	conn.Close()
 }
