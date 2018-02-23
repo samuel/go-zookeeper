@@ -310,10 +310,14 @@ func WithMaxConnBufferSize(maxBufferSize int) connOption {
 }
 
 func (c *Conn) Close() {
+	rc, err := c.queueRequest(opClose, &closeRequest{}, &closeResponse{}, nil)
+	if err != nil {
+		return
+	}
 	close(c.shouldQuit)
 
 	select {
-	case <-c.queueRequest(opClose, &closeRequest{}, &closeResponse{}, nil):
+	case <-rc:
 	case <-time.After(time.Second):
 	}
 }
@@ -933,7 +937,13 @@ func (c *Conn) addWatcher(path string, watchType watchType) <-chan Event {
 	return ch
 }
 
-func (c *Conn) queueRequest(opcode int32, req interface{}, res interface{}, recvFunc func(*request, *responseHeader, error)) <-chan response {
+func (c *Conn) queueRequest(opcode int32, req interface{}, res interface{}, recvFunc func(*request, *responseHeader, error)) (<-chan response, error) {
+	select {
+	case <-c.shouldQuit:
+		return nil, ErrClosing
+	default:
+	}
+
 	rq := &request{
 		xid:        c.nextXid(),
 		opcode:     opcode,
@@ -942,13 +952,27 @@ func (c *Conn) queueRequest(opcode int32, req interface{}, res interface{}, recv
 		recvChan:   make(chan response, 1),
 		recvFunc:   recvFunc,
 	}
-	c.sendChan <- rq
-	return rq.recvChan
+
+	select {
+	case c.sendChan <- rq:
+		return rq.recvChan, nil
+	case <-c.shouldQuit:
+		return nil, ErrClosing
+	}
 }
 
 func (c *Conn) request(opcode int32, req interface{}, res interface{}, recvFunc func(*request, *responseHeader, error)) (int64, error) {
-	r := <-c.queueRequest(opcode, req, res, recvFunc)
-	return r.zxid, r.err
+	rc, err := c.queueRequest(opcode, req, res, recvFunc)
+	if err != nil {
+		return 0, err
+	}
+
+	select {
+	case r := <-rc:
+		return r.zxid, r.err
+	case <-c.shouldQuit:
+		return 0, ErrClosing
+	}
 }
 
 func (c *Conn) AddAuth(scheme string, auth []byte) error {

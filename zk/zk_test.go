@@ -666,6 +666,23 @@ func TestRequestFail(t *testing.T) {
 	}
 }
 
+func TestRequestFailAfterClosed(t *testing.T) {
+	ts, err := StartTestCluster(1, nil, logWriter{t: t, p: "[ZKERR] "})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ts.Stop()
+	zk, _, err := ts.ConnectAll()
+	if err != nil {
+		t.Fatalf("Connect returned error: %+v", err)
+	}
+	zk.Close()
+	_, _, err = zk.Get("/blah")
+	if err != ErrClosing {
+		t.Fatalf("unexpected err: %+v", err)
+	}
+}
+
 func TestSlowServer(t *testing.T) {
 	ts, err := StartTestCluster(1, nil, logWriter{t: t, p: "[ZKERR] "})
 	if err != nil {
