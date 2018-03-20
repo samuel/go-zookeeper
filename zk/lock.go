@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"time"
 )
 
 var (
@@ -21,6 +22,7 @@ type Lock struct {
 	acl      []ACL
 	lockPath string
 	seq      int
+	donec    chan struct{}
 }
 
 // NewLock creates a new lock instance using the provided connection, path, and acl.
@@ -37,6 +39,21 @@ func NewLock(c *Conn, path string, acl []ACL) *Lock {
 func parseSeq(path string) (int, error) {
 	parts := strings.Split(path, "-")
 	return strconv.Atoi(parts[len(parts)-1])
+}
+
+func (l *Lock)  Done() <- chan struct{} {
+	return l.donec
+}
+
+func (l *Lock) checkLoop()  {
+	for {
+		_, _, err := l.c.Get(l.lockPath)
+		if err != nil {
+			close(l.donec)
+			return
+		}
+		time.Sleep(time.Millisecond * 500)
+	}
 }
 
 // Lock attempts to acquire the lock. It will wait to return until the lock
@@ -132,6 +149,8 @@ func (l *Lock) Lock() error {
 
 	l.seq = seq
 	l.lockPath = path
+	l.donec = make(chan struct{})
+	go l.checkLoop()
 	return nil
 }
 
