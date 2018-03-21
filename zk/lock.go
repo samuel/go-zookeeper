@@ -39,6 +39,26 @@ func parseSeq(path string) (int, error) {
 	return strconv.Atoi(parts[len(parts)-1])
 }
 
+func (l *Lock)Path()  string {
+	return l.lockPath
+}
+
+func (l *Lock) Done(path string)  <-chan struct{} {
+	donec := make(chan struct{})
+
+	go func(chan struct{}, string) {
+		for {
+			_, _, err := l.c.Get(path)
+			if err != nil {
+				close(donec)
+				return
+			}
+		}
+	}(donec, path)
+
+	return donec
+}
+
 // Lock attempts to acquire the lock. It will wait to return until the lock
 // is acquired or an error occurs. If this instance already has the lock
 // then ErrDeadlock is returned.
