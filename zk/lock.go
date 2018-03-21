@@ -49,7 +49,7 @@ func (l *Lock) checkLoop()  {
 	for {
 		_, _, err := l.c.Get(l.lockPath)
 		if err != nil {
-			close(l.donec)
+			l.Unlock()
 			return
 		}
 		time.Sleep(time.Millisecond * 500)
@@ -165,5 +165,6 @@ func (l *Lock) Unlock() error {
 	}
 	l.lockPath = ""
 	l.seq = 0
+	close(l.donec)
 	return nil
 }
