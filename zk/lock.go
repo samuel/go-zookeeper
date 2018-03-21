@@ -22,7 +22,6 @@ type Lock struct {
 	acl      []ACL
 	lockPath string
 	seq      int
-	donec    chan struct{}
 }
 
 // NewLock creates a new lock instance using the provided connection, path, and acl.
@@ -41,19 +40,24 @@ func parseSeq(path string) (int, error) {
 	return strconv.Atoi(parts[len(parts)-1])
 }
 
-func (l *Lock)  Done() <- chan struct{} {
-	return l.donec
+func (l *Lock)Path()  string {
+	return l.lockPath
 }
 
-func (l *Lock) checkLoop(path string)  {
-	for {
-		_, _, err := l.c.Get(path)
-		if err != nil && l.lockPath == path{
-			l.Unlock()
-			return
+func (l *Lock) Done(path string)  <-chan struct{} {
+	donec := make(chan struct{})
+
+	go func(chan struct{}, string) {
+		for {
+			_, _, err := l.c.Get(path)
+			if err != nil {
+				close(donec)
+				return
+			}
 		}
-		time.Sleep(time.Millisecond * 500)
-	}
+	}(donec, path)
+
+	return donec
 }
 
 // Lock attempts to acquire the lock. It will wait to return until the lock
@@ -149,8 +153,6 @@ func (l *Lock) Lock() error {
 
 	l.seq = seq
 	l.lockPath = path
-	l.donec = make(chan struct{})
-	go l.checkLoop(path)
 	return nil
 }
 
@@ -165,6 +167,5 @@ func (l *Lock) Unlock() error {
 	}
 	l.lockPath = ""
 	l.seq = 0
-	close(l.donec)
 	return nil
 }
