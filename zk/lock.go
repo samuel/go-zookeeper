@@ -45,10 +45,10 @@ func (l *Lock)  Done() <- chan struct{} {
 	return l.donec
 }
 
-func (l *Lock) checkLoop()  {
+func (l *Lock) checkLoop(path string)  {
 	for {
-		_, _, err := l.c.Get(l.lockPath)
-		if err != nil {
+		_, _, err := l.c.Get(path)
+		if err != nil && l.lockPath == path{
 			l.Unlock()
 			return
 		}
@@ -150,7 +150,7 @@ func (l *Lock) Lock() error {
 	l.seq = seq
 	l.lockPath = path
 	l.donec = make(chan struct{})
-	go l.checkLoop()
+	go l.checkLoop(path)
 	return nil
 }
 
