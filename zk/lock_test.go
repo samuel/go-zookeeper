@@ -61,6 +61,31 @@ func TestLock(t *testing.T) {
 	}
 }
 
+func TestLock_Done(t *testing.T) {
+	ts, err := StartTestCluster(1, nil, logWriter{t: t, p: "[ZKERR] "})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ts.Stop()
+	zk, _, err := ts.ConnectAll()
+	if err != nil {
+		t.Fatalf("Connect returned error: %+v", err)
+	}
+	defer zk.Close()
+
+	acls := WorldACL(PermAll)
+
+	l := NewLock(zk, "/election", acls)
+
+	time.AfterFunc(time.Second, func() {
+		l.Unlock()
+	})
+	select {
+	case <-l.Done(l.Path()):
+		t.Log("Stop")
+	}
+}
+
 // This tests creating a lock with a path that's more than 1 node deep (e.g. "/test-multi-level/lock"),
 // when a part of that path already exists (i.e. "/test-multi-level" node already exists).
 func TestMultiLevelLock(t *testing.T) {
