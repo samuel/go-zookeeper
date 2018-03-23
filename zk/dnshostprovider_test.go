@@ -1,6 +1,7 @@
 package zk
 
 import (
+	"errors"
 	"fmt"
 	"log"
 	"testing"
@@ -162,6 +163,50 @@ func TestDNSHostProviderReconnect(t *testing.T) {
 
 	if zk.Server() == currentServer {
 		t.Errorf("Still connected to %q after restart.", currentServer)
+	}
+}
+
+// TestDNSHostOneHostDead tests whether
+func TestDNSHostOneHostDead(t *testing.T) {
+	// use channel to simulate a server that was initially dead but came back online later
+	ch := make(chan struct{}, 0)
+	hp := &DNSHostProvider{lookupHost: func(host string) ([]string, error) {
+		if host != "foo.failure.com" {
+			return []string{"192.0.2.1", "192.0.2.2"}, nil
+		}
+		select {
+		case <-ch:
+			return []string{"192.0.2.3"}, nil
+		default:
+			return nil, errors.New("Fails to ns lookup")
+		}
+	}, sleep: func(_ time.Duration) {}}
+
+	if err := hp.Init([]string{"foo.failure.com:12345", "foo.success.com:12345"}); err != nil {
+		t.Fatal(err)
+	}
+
+	hp.mu.Lock()
+	if len(hp.servers) != 2 {
+		t.Fatal("Only servers that resolved by lookupHost should be in servers list")
+	}
+	hp.mu.Unlock()
+
+	// simulating one server comes back online
+	close(ch)
+
+	// starts a 30s retry loop to wait servers list to be updated
+	startRetryLoop := time.Now()
+	for {
+		time.Sleep(time.Millisecond * 5)
+		hp.mu.Lock()
+		if len(hp.servers) == 3 {
+			break
+		}
+		hp.mu.Unlock()
+		if time.Since(startRetryLoop) > time.Second*30 {
+			t.Fatal("Servers get back online should be added to the servers list")
+		}
 	}
 }
 
