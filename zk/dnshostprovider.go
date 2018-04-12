@@ -38,7 +38,7 @@ func (hp *DNSHostProvider) Init(servers []string) error {
 		}
 		addrs, err := lookupHost(host)
 		if err != nil {
-			return err
+			continue
 		}
 		for _, addr := range addrs {
 			found = append(found, net.JoinHostPort(addr, port))
