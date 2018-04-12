@@ -50,6 +50,24 @@ func TestDNSHostProviderCreate(t *testing.T) {
 	}
 }
 
+func TestDNSHostProviderFailedLookup(t *testing.T) {
+	ts, err := StartTestCluster(1, nil, logWriter{t: t, p: "[ZKERR] "})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ts.Stop()
+
+	port := ts.Servers[0].Port
+	unknownServer := fmt.Sprintf("unknown.example.com:%d", port)
+	knownServer := fmt.Sprintf("foo.example.com:%d", port)
+	hostProvider := &DNSHostProvider{lookupHost: localhostLookupHost}
+	zk, _, err := Connect([]string{unknownServer, knownServer}, time.Second*15, WithHostProvider(hostProvider))
+	if err != nil {
+		t.Fatalf("Connect returned error: %+v", err)
+	}
+	zk.Close()
+}
+
 // localHostPortsFacade wraps a HostProvider, remapping the
 // address/port combinations it returns to "localhost:$PORT" where
 // $PORT is chosen from the provided ports.
