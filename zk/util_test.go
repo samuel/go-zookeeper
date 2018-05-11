@@ -1,6 +1,9 @@
 package zk
 
-import "testing"
+import (
+	"reflect"
+	"testing"
+)
 
 func TestFormatServers(t *testing.T) {
 	t.Parallel()
@@ -50,4 +53,125 @@ func TestValidatePath(t *testing.T) {
 			t.Errorf("failed to validate path %q", tc.path)
 		}
 	}
+}
+
+func TestListSubtree(t *testing.T) {
+	ts, err := StartTestCluster(1, nil, logWriter{t: t, p: "[ZKERR] "})
+	assertNoErrors(t, err)
+	defer ts.Stop()
+
+	conn, err := ts.Connect(0)
+	assertNoErrors(t, err)
+	defer conn.Close()
+
+	createEmptyNodeOrFail(t, conn, "/abc")
+	createEmptyNodeOrFail(t, conn, "/abc/123")
+	createEmptyNodeOrFail(t, conn, "/abc/123/xyz")
+	createEmptyNodeOrFail(t, conn, "/def")
+	createEmptyNodeOrFail(t, conn, "/foo")
+	createEmptyNodeOrFail(t, conn, "/foo/bar")
+	createEmptyNodeOrFail(t, conn, "/foo/baz")
+
+	subtree, err := ListSubtree(conn, DefaultRoot)
+	assertNoErrors(t, err)
+
+	expected := []string{"/", "/abc", "/zookeeper", "/def", "/foo", "/abc/123", "/zookeeper/quota", "/foo/bar", "/foo/baz", "/abc/123/xyz"}
+
+	if !reflect.DeepEqual(expected, subtree) {
+		t.Fatalf("Expected %v, got %v", expected, subtree)
+	}
+
+	subtree, err = ListSubtree(conn, "/foo")
+	assertNoErrors(t, err)
+
+	expected = []string{"/foo", "/foo/bar", "/foo/baz"}
+
+	if !reflect.DeepEqual(expected, subtree) {
+		t.Fatalf("Expected %v, got %v", expected, subtree)
+	}
+}
+
+func TestDeleteRecursively(t *testing.T) {
+	ts, err := StartTestCluster(1, nil, logWriter{t: t, p: "[ZKERR] "})
+	assertNoErrors(t, err)
+	defer ts.Stop()
+
+	conn, err := ts.Connect(0)
+	assertNoErrors(t, err)
+	defer conn.Close()
+
+	createEmptyNodeOrFail(t, conn, "/abc")
+	createEmptyNodeOrFail(t, conn, "/abc/123")
+	createEmptyNodeOrFail(t, conn, "/abc/123/1")
+	createEmptyNodeOrFail(t, conn, "/abc/123/1/a")
+	createEmptyNodeOrFail(t, conn, "/abc/123/2")
+	createEmptyNodeOrFail(t, conn, "/abc/123/2/b")
+	createEmptyNodeOrFail(t, conn, "/abc/123/3")
+	createEmptyNodeOrFail(t, conn, "/abc/123/3/d")
+	createEmptyNodeOrFail(t, conn, "/abc/123/3/d/e")
+	createEmptyNodeOrFail(t, conn, "/abc/123/3/d/e/f")
+
+	subtree, err := ListSubtree(conn, DefaultRoot)
+	assertNoErrors(t, err)
+
+	expected := []string{"/", "/abc", "/zookeeper", "/abc/123", "/zookeeper/quota", "/abc/123/1", "/abc/123/2",
+		"/abc/123/3", "/abc/123/1/a", "/abc/123/2/b", "/abc/123/3/d", "/abc/123/3/d/e", "/abc/123/3/d/e/f"}
+
+	if !reflect.DeepEqual(expected, subtree) {
+		t.Fatalf("Expected %v, got %v", expected, subtree)
+	}
+
+	err = DeleteRecursively(conn, "/abc/123/3")
+	assertNoErrors(t, err)
+
+	subtree, err = ListSubtree(conn, DefaultRoot)
+	assertNoErrors(t, err)
+
+	expected = []string{"/", "/abc", "/zookeeper", "/abc/123", "/zookeeper/quota", "/abc/123/1", "/abc/123/2",
+		"/abc/123/1/a", "/abc/123/2/b"}
+
+	if !reflect.DeepEqual(expected, subtree) {
+		t.Fatalf("Expected %v, got %v", expected, subtree)
+	}
+
+	err = DeleteRecursively(conn, DefaultRoot)
+	assertNoErrors(t, err)
+
+	subtree, err = ListSubtree(conn, DefaultRoot)
+	assertNoErrors(t, err)
+
+	expected = []string{"/", "/zookeeper", "/zookeeper/quota"}
+
+	if !reflect.DeepEqual(expected, subtree) {
+		t.Fatalf("Expected %v, got %v", expected, subtree)
+	}
+}
+
+func TestIsInternalNode(t *testing.T) {
+	if IsInternalNode("/abc") {
+		t.Error("/abc is not an internal node")
+	}
+
+	if IsInternalNode("/zookeeperstuff") {
+		t.Error("/zookeeperstuff is not an internal node")
+	}
+
+	if !IsInternalNode("/zookeeper") {
+		t.Error("/zookeeper is an internal node")
+	}
+
+	if !IsInternalNode("/zookeeper/something") {
+		t.Error("/zookeeper/something is an internal node")
+	}
+}
+
+func assertNoErrors(t *testing.T, err error) {
+	if err != nil {
+		t.Fatalf("Caught unexpected error: %v", err)
+	}
+}
+
+func createEmptyNodeOrFail(t *testing.T, conn *Conn, path string) {
+	_, err := conn.Create(path, []byte{0}, 0, WorldACL(PermAll))
+	assertNoErrors(t, err)
 }
