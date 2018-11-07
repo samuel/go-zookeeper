@@ -7,11 +7,16 @@ package zk
 import (
 	"fmt"
 	"strings"
+	"errors"
 )
 
 const (
 	readSeqPrefix  = "read"
 	writeSeqPrefix = "write"
+)
+
+var (
+	ErrorMultipleLock = errors.New("zk: shared lock instance can lock only once")
 )
 
 // ZKRWLock defines distributed lock implemented with zk
@@ -35,14 +40,17 @@ type zkRWLockImpl struct {
 	conn          *Conn
 	path          string
 	acl           []ACL
+	using bool
 	writeLockPath string
 	readLockPath  string
 }
 
 func (l *zkRWLockImpl) Lock() error {
-	if l.writeLockPath != "" {
-		return ErrDeadlock
+	if l.using  {
+		return ErrorMultipleLock
 	}
+
+	l.using = true
 
 	prefix := fmt.Sprintf("%s/%s-", l.path, writeSeqPrefix)
 
@@ -143,9 +151,11 @@ func (l *zkRWLockImpl) Unlock() error {
 }
 
 func (l *zkRWLockImpl) RLock() error {
-	if l.readLockPath != "" {
-		return ErrDeadlock
+	if l.using  {
+		return ErrorMultipleLock
 	}
+
+	l.using = true
 
 	prefix := fmt.Sprintf("%s/%s-", l.path, readSeqPrefix)
 

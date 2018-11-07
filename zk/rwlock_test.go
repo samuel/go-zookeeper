@@ -190,6 +190,23 @@ func TestRWLock(t *testing.T) {
 		assert.Error(t, err)
 	})
 
+	t.Run("should error if used more than once", func(t *testing.T){
+		ts, err := StartTestCluster(1, nil, nil)
+		if err != nil {
+			panic(err)
+		}
+		conn, _, err := ts.ConnectAll()
+		l := NewZKRWLock(conn, lockpath, acls)
+		l.RLock()
+		err = l.RLock()
+		assert.EqualError(t, err, "zk: shared lock instance can lock only once")
+		err = l.Lock()
+		assert.EqualError(t, err, "zk: shared lock instance can lock only once")
+
+		conn.Close()
+		ts.Stop()
+	})
+
 }
 
 func getChildrenCount(conn *Conn, path string) (c int) {
