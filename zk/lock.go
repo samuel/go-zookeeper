@@ -3,7 +3,6 @@ package zk
 import (
 	"errors"
 	"fmt"
-	"strconv"
 	"strings"
 )
 
@@ -32,11 +31,6 @@ func NewLock(c *Conn, path string, acl []ACL) *Lock {
 		path: path,
 		acl:  acl,
 	}
-}
-
-func parseSeq(path string) (int, error) {
-	parts := strings.Split(path, "-")
-	return strconv.Atoi(parts[len(parts)-1])
 }
 
 // Lock attempts to acquire the lock. It will wait to return until the lock
@@ -82,7 +76,7 @@ func (l *Lock) Lock() error {
 		return err
 	}
 
-	seq, err := parseSeq(path)
+	seq, err := parseSeq(path, "")
 	if err != nil {
 		return err
 	}
@@ -97,7 +91,7 @@ func (l *Lock) Lock() error {
 		prevSeq := -1
 		prevSeqPath := ""
 		for _, p := range children {
-			s, err := parseSeq(p)
+			s, err := parseSeq(p, "")
 			if err != nil {
 				return err
 			}
