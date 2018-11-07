@@ -7,8 +7,6 @@ package zk
 import (
 	"fmt"
 	"strings"
-
-	"github.com/samuel/go-zookeeper/zk"
 )
 
 const (
@@ -25,7 +23,7 @@ type ZKRWLock interface {
 }
 
 // NewZKRWLock returns a new ZKRWLock
-func NewZKRWLock(c *zk.Conn, path string, acl []zk.ACL) ZKRWLock {
+func NewZKRWLock(c *Conn, path string, acl []ACL) ZKRWLock {
 	return &zkRWLockImpl{
 		conn: c,
 		path: path,
@@ -34,16 +32,16 @@ func NewZKRWLock(c *zk.Conn, path string, acl []zk.ACL) ZKRWLock {
 }
 
 type zkRWLockImpl struct {
-	conn          *zk.Conn
+	conn          *Conn
 	path          string
-	acl           []zk.ACL
+	acl           []ACL
 	writeLockPath string
 	readLockPath  string
 }
 
 func (l *zkRWLockImpl) Lock() error {
 	if l.writeLockPath != "" {
-		return zk.ErrDeadlock
+		return ErrDeadlock
 	}
 
 	prefix := fmt.Sprintf("%s/%s-", l.path, writeSeqPrefix)
@@ -52,7 +50,7 @@ func (l *zkRWLockImpl) Lock() error {
 	var err error
 	for i := 0; i < 3; i++ {
 		path, err = l.conn.CreateProtectedEphemeralSequential(prefix, []byte{}, l.acl)
-		if err == zk.ErrNoNode {
+		if err == ErrNoNode {
 			// Create parent node.
 			parts := strings.Split(l.path, "/")
 			pth := ""
@@ -67,7 +65,7 @@ func (l *zkRWLockImpl) Lock() error {
 					continue
 				}
 				_, err = l.conn.Create(pth, []byte{}, 0, l.acl)
-				if err != nil && err != zk.ErrNodeExists {
+				if err != nil && err != ErrNodeExists {
 					return err
 				}
 			}
@@ -116,9 +114,9 @@ func (l *zkRWLockImpl) Lock() error {
 
 		// Wait on the node next in line for the lock
 		_, _, ch, err := l.conn.GetW(l.path + "/" + prevSeqPath)
-		if err != nil && err != zk.ErrNoNode {
+		if err != nil && err != ErrNoNode {
 			return err
-		} else if err != nil && err == zk.ErrNoNode {
+		} else if err != nil && err == ErrNoNode {
 			// try again
 			continue
 		}
@@ -135,7 +133,7 @@ func (l *zkRWLockImpl) Lock() error {
 
 func (l *zkRWLockImpl) Unlock() error {
 	if l.writeLockPath == "" {
-		return zk.ErrNotLocked
+		return ErrNotLocked
 	}
 	if err := l.conn.Delete(l.writeLockPath, -1); err != nil {
 		return err
@@ -146,7 +144,7 @@ func (l *zkRWLockImpl) Unlock() error {
 
 func (l *zkRWLockImpl) RLock() error {
 	if l.readLockPath != "" {
-		return zk.ErrDeadlock
+		return ErrDeadlock
 	}
 
 	prefix := fmt.Sprintf("%s/%s-", l.path, readSeqPrefix)
@@ -155,7 +153,7 @@ func (l *zkRWLockImpl) RLock() error {
 	var err error
 	for i := 0; i < 3; i++ {
 		path, err = l.conn.CreateProtectedEphemeralSequential(prefix, []byte{}, l.acl)
-		if err == zk.ErrNoNode {
+		if err == ErrNoNode {
 			// Create parent node.
 			parts := strings.Split(l.path, "/")
 			pth := ""
@@ -170,7 +168,7 @@ func (l *zkRWLockImpl) RLock() error {
 					continue
 				}
 				_, err = l.conn.Create(pth, []byte{}, 0, l.acl)
-				if err != nil && err != zk.ErrNodeExists {
+				if err != nil && err != ErrNodeExists {
 					return err
 				}
 			}
@@ -219,9 +217,9 @@ func (l *zkRWLockImpl) RLock() error {
 
 		// Wait on the node next in line for the lock
 		_, _, ch, err := l.conn.GetW(l.path + "/" + prevSeqPath)
-		if err != nil && err != zk.ErrNoNode {
+		if err != nil && err != ErrNoNode {
 			return err
-		} else if err != nil && err == zk.ErrNoNode {
+		} else if err != nil && err == ErrNoNode {
 			// try again
 			continue
 		}
@@ -237,7 +235,7 @@ func (l *zkRWLockImpl) RLock() error {
 }
 func (l *zkRWLockImpl) RUnlock() error {
 	if l.readLockPath == "" {
-		return zk.ErrNotLocked
+		return ErrNotLocked
 	}
 	if err := l.conn.Delete(l.readLockPath, -1); err != nil {
 		return err

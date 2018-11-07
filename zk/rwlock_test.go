@@ -4,16 +4,15 @@ import (
 	"testing"
 	"time"
 
-	"github.com/samuel/go-zookeeper/zk"
 	"github.com/stretchr/testify/assert"
 )
 
 func TestRWLock(t *testing.T) {
-	acls := zk.WorldACL(zk.PermAll)
+	acls := WorldACL(PermAll)
 	lockpath := "/lock_test"
 
 	t.Run("should work for single read lock", func(t *testing.T) {
-		ts, err := zk.StartTestCluster(1, nil, nil)
+		ts, err := StartTestCluster(1, nil, nil)
 		if err != nil {
 			panic(err)
 		}
@@ -32,7 +31,7 @@ func TestRWLock(t *testing.T) {
 	})
 
 	t.Run("should work for write locks", func(t *testing.T) {
-		ts, err := zk.StartTestCluster(1, nil, nil)
+		ts, err := StartTestCluster(1, nil, nil)
 		if err != nil {
 			panic(err)
 		}
@@ -69,7 +68,7 @@ func TestRWLock(t *testing.T) {
 	})
 
 	t.Run("should work that read locks block write locks", func(t *testing.T) {
-		ts, err := zk.StartTestCluster(1, nil, nil)
+		ts, err := StartTestCluster(1, nil, nil)
 		if err != nil {
 			panic(err)
 		}
@@ -106,7 +105,7 @@ func TestRWLock(t *testing.T) {
 	})
 
 	t.Run("should work for multiple read locks", func(t *testing.T) {
-		ts, err := zk.StartTestCluster(1, nil, nil)
+		ts, err := StartTestCluster(1, nil, nil)
 		if err != nil {
 			panic(err)
 		}
@@ -142,7 +141,7 @@ func TestRWLock(t *testing.T) {
 	})
 
 	t.Run("should work that write locks block read locks", func(t *testing.T) {
-		ts, err := zk.StartTestCluster(1, nil, nil)
+		ts, err := StartTestCluster(1, nil, nil)
 		if err != nil {
 			panic(err)
 		}
@@ -180,12 +179,12 @@ func TestRWLock(t *testing.T) {
 
 }
 
-func afterEach(ts *zk.TestCluster, conn *zk.Conn) {
+func afterEach(ts *TestCluster, conn *Conn) {
 	conn.Close()
 	ts.Stop()
 }
 
-func getChildrenCount(conn *zk.Conn, path string) (c int) {
+func getChildrenCount(conn *Conn, path string) (c int) {
 	children, _, err := conn.Children(path)
 	if err != nil {
 		panic(err)
