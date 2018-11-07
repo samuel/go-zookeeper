@@ -1,6 +1,8 @@
 package zk
 
-import "testing"
+import (
+	"testing"
+)
 
 func TestFormatServers(t *testing.T) {
 	t.Parallel()
@@ -48,6 +50,33 @@ func TestValidatePath(t *testing.T) {
 		err := validatePath(tc.path, tc.seq)
 		if (err != nil) == tc.valid {
 			t.Errorf("failed to validate path %q", tc.path)
+		}
+	}
+}
+
+func TestParseSeq(t *testing.T) {
+	tt := []struct {
+		path string
+		rw string
+		res int
+		hasErr bool
+	}{
+		{"/valid/path-0", "", 0, false},
+		{"/valid/path_read-0", "read", 0, false},
+		{"/invalid/path_rea-0", "read", -1, false},
+		{"/invalid", "", -1, true},
+		{"/valid/path_write-1", "write", 1, false},
+		{"/invalid/path_wri-1", "write", -1, false},
+	}
+
+	for _, tc := range tt {
+		r, err := parseSeq(tc.path, tc.rw)
+
+		if (err != nil) != tc.hasErr{
+			t.Error("unexpected error state")
+		}
+		if r != tc.res {
+			t.Errorf("expected %d but got %d", tc.res, r)
 		}
 	}
 }

@@ -27,7 +27,8 @@ func TestRWLock(t *testing.T) {
 		err = l1.RUnlock()
 		assert.NoError(t, err)
 		assert.Equal(t, 0, getChildrenCount(conn, lockpath))
-		afterEach(ts, conn)
+		conn.Close()
+		ts.Stop()
 	})
 
 	t.Run("should work for write locks", func(t *testing.T) {
@@ -64,7 +65,8 @@ func TestRWLock(t *testing.T) {
 		assert.Equal(t, 1, x)
 		x = <-resChan
 		assert.Equal(t, 2, x)
-		afterEach(ts, conn)
+		conn.Close()
+		ts.Stop()
 	})
 
 	t.Run("should work that read locks block write locks", func(t *testing.T) {
@@ -101,7 +103,8 @@ func TestRWLock(t *testing.T) {
 		assert.Equal(t, 1, x)
 		x = <-resChan
 		assert.Equal(t, 2, x)
-		afterEach(ts, conn)
+		conn.Close()
+		ts.Stop()
 	})
 
 	t.Run("should work for multiple read locks", func(t *testing.T) {
@@ -137,7 +140,8 @@ func TestRWLock(t *testing.T) {
 		assert.Equal(t, 2, x)
 		x = <-resChan
 		assert.Equal(t, 1, x)
-		afterEach(ts, conn)
+		conn.Close()
+		ts.Stop()
 	})
 
 	t.Run("should work that write locks block read locks", func(t *testing.T) {
@@ -174,14 +178,18 @@ func TestRWLock(t *testing.T) {
 		assert.Equal(t, 1, x)
 		x = <-resChan
 		assert.Equal(t, 2, x)
-		afterEach(ts, conn)
+		conn.Close()
+		ts.Stop()
 	})
 
-}
+	t.Run("should error if unlock without locking", func(t *testing.T){
+		l := NewZKRWLock(nil, lockpath, acls)
+		err := l.RUnlock()
+		assert.Error(t, err)
+		err = l.Unlock()
+		assert.Error(t, err)
+	})
 
-func afterEach(ts *TestCluster, conn *Conn) {
-	conn.Close()
-	ts.Stop()
 }
 
 func getChildrenCount(conn *Conn, path string) (c int) {

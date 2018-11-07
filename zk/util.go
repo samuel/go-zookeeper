@@ -120,7 +120,7 @@ func parseSeq(path string, rw string) (int, error) {
 	parts := strings.Split(path, "-")
 	l := len(parts)
 	if l < 2 {
-		return 0, fmt.Errorf("wrong path format: %s", path)
+		return -1, fmt.Errorf("wrong path format: %s", path)
 	}
 	if rw != "" && !strings.HasSuffix(parts[l-2], rw) {
 		return -1, nil
