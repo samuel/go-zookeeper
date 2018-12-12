@@ -143,9 +143,7 @@ func (l *Lock) LockOrFail() error {
 	}
 	var err error
 	children, _, err := l.c.Children(l.path)
-	if err!= nil {
-		return err
-	}
+
 	if len(children) >= 1{
 		return ErrLockFailed
 	}
