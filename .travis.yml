@@ -1,6 +1,6 @@
 language: go
 go:
-  - 1.9
+  - 1.10
 
 jdk:
   - oraclejdk9
@@ -10,6 +10,7 @@ sudo: false
 branches:
   only:
     - master
+    - dev
 
 before_install:
   - wget http://apache.cs.utah.edu/zookeeper/zookeeper-${zk_version}/zookeeper-${zk_version}.tar.gz
@@ -27,7 +28,5 @@ script:
   - goveralls -coverprofile=profile.cov -service=travis-ci
 
 env:
-  global:
-    secure: Coha3DDcXmsekrHCZlKvRAc+pMBaQU1QS/3++3YCCUXVDBWgVsC1ZIc9df4RLdZ/ncGd86eoRq/S+zyn1XbnqK5+ePqwJoUnJ59BE8ZyHLWI9ajVn3fND1MTduu/ksGsS79+IYbdVI5wgjSgjD3Ktp6Y5uPl+BPosjYBGdNcHS4=
   matrix:
-    - zk_version=3.4.10
+    - zk_version=3.5.4-beta
