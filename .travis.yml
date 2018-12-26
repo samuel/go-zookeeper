@@ -1,6 +1,8 @@
 language: go
 go:
   - 1.11
+  - 1.9
+  - tip
 
 go_import_path: github.com/samuel/go-zookeeper
 
@@ -25,6 +27,12 @@ script:
   - jdk_switcher use oraclejdk9
   - go build ./...
   - make test
+
+matrix:
+  allow_failures:
+    - go: tip
+    - env: zk_version=3.5.4-beta
+  fast_finish: true
 
 env:
   global:

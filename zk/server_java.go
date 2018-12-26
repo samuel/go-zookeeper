@@ -49,10 +49,9 @@ func New3dot4TestServer(t *testing.T, configPath string, stdout, stderr io.Write
 }
 
 func New3dot5TestServer(t *testing.T, configPath string, stdout, stderr io.Writer) (*server, error) {
-	// if os.Stat("../zookeeper-3.5.4-beta/bin/zkServer.sh")
 	zkPath := os.Getenv("ZOOKEEPER_BIN_PATH")
 	if zkPath == "" {
-		// default to a static path that can be setup with a build system
+		// default to a static reletive path that can be setup with a build system
 		zkPath = "../zookeeper/bin"
 	}
 	if _, err := os.Stat(zkPath); err != nil {

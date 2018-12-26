@@ -1,7 +1,6 @@
 package zk
 
 import (
-	"os"
 	"sync"
 	"testing"
 	"time"
@@ -18,7 +17,7 @@ func (lw logWriter) Write(b []byte) (int, error) {
 }
 
 func TestBasicCluster(t *testing.T) {
-	ts, err := StartTestCluster(t, 3, os.Stdout, logWriter{t: t, p: "[ZKERR] "})
+	ts, err := StartTestCluster(t, 3, nil, logWriter{t: t, p: "[ZKERR] "})
 	if err != nil {
 		t.Fatal(err)
 	}
