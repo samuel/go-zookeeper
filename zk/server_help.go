@@ -7,7 +7,9 @@ import (
 	"math/rand"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
+	"testing"
 	"time"
 )
 
@@ -18,7 +20,7 @@ func init() {
 type TestServer struct {
 	Port int
 	Path string
-	Srv  *Server
+	Srv  *server
 }
 
 type TestCluster struct {
@@ -26,11 +28,33 @@ type TestCluster struct {
 	Servers []TestServer
 }
 
-func StartTestCluster(size int, stdout, stderr io.Writer) (*TestCluster, error) {
+func StartTestCluster(t *testing.T, size int, stdout, stderr io.Writer) (*TestCluster, error) {
+	if testing.Short() {
+		t.Skip("ZK clsuter tests skipped in short case.")
+	}
+	var (
+		version int
+		err     error
+	)
+	// this will be set by systems like travis_ci to be able to test multiple versions
+	testingServerVersion := os.Getenv("zk_version")
+	if testingServerVersion != "" {
+		// will look like a semver ie. 3.4.1 or 3.5.4-beta
+		parts := strings.Split(testingServerVersion, ".")
+		if len(parts) >= 2 {
+			// minor version we switch on
+			version, err = strconv.Atoi(parts[1])
+			if err != nil {
+				t.Fatalf("failed to detect zk minor version from environment: %v", err)
+			}
+		}
+	}
+
 	tmpPath, err := ioutil.TempDir("", "gozk")
 	if err != nil {
-		return nil, err
+		t.Fatalf("failed to create tmp fir for test server setup: %v", err)
 	}
+
 	success := false
 	startPort := int(rand.Int31n(6000) + 10000)
 	cluster := &TestCluster{Path: tmpPath}
@@ -42,8 +66,9 @@ func StartTestCluster(size int, stdout, stderr io.Writer) (*TestCluster, error) 
 	for serverN := 0; serverN < size; serverN++ {
 		srvPath := filepath.Join(tmpPath, fmt.Sprintf("srv%d", serverN))
 		if err := os.Mkdir(srvPath, 0700); err != nil {
-			return nil, err
+			t.Fatalf("failed to make server path: %v", err)
 		}
+
 		port := startPort + serverN*3
 		cfg := ServerConfig{
 			ClientPort: port,
@@ -57,6 +82,7 @@ func StartTestCluster(size int, stdout, stderr io.Writer) (*TestCluster, error) 
 				LeaderElectionPort: startPort + i*3 + 2,
 			})
 		}
+
 		cfgPath := filepath.Join(srvPath, "zoo.cfg")
 		fi, err := os.Create(cfgPath)
 		if err != nil {
@@ -78,23 +104,35 @@ func StartTestCluster(size int, stdout, stderr io.Writer) (*TestCluster, error) 
 			return nil, err
 		}
 
-		srv := &Server{
-			ConfigPath: cfgPath,
-			Stdout:     stdout,
-			Stderr:     stderr,
+		var srv *server
+		if version == 0 || version < 5 {
+			// we default assume we want a 3.4 cluster
+			srv, err = New3dot4TestServer(t, cfgPath, stdout, stderr)
+			if err != nil {
+				return nil, err
+			}
+		} else {
+			srv, err = New3dot5TestServer(t, cfgPath, stdout, stderr)
+			if err != nil {
+				return nil, err
+			}
 		}
+
 		if err := srv.Start(); err != nil {
 			return nil, err
 		}
+
 		cluster.Servers = append(cluster.Servers, TestServer{
 			Path: srvPath,
 			Port: cfg.ClientPort,
 			Srv:  srv,
 		})
 	}
-	if err := cluster.waitForStart(10, time.Second); err != nil {
+
+	if err := cluster.waitForStart(20, time.Second); err != nil {
 		return nil, err
 	}
+
 	success = true
 	return cluster, nil
 }

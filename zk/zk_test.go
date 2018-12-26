@@ -17,7 +17,7 @@ import (
 )
 
 func TestStateChanges(t *testing.T) {
-	ts, err := StartTestCluster(1, nil, logWriter{t: t, p: "[ZKERR] "})
+	ts, err := StartTestCluster(t, 1, nil, logWriter{t: t, p: "[ZKERR] "})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -63,7 +63,7 @@ func TestStateChanges(t *testing.T) {
 }
 
 func TestCreate(t *testing.T) {
-	ts, err := StartTestCluster(1, nil, logWriter{t: t, p: "[ZKERR] "})
+	ts, err := StartTestCluster(t, 1, nil, logWriter{t: t, p: "[ZKERR] "})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -94,7 +94,7 @@ func TestCreate(t *testing.T) {
 }
 
 func TestMulti(t *testing.T) {
-	ts, err := StartTestCluster(1, nil, logWriter{t: t, p: "[ZKERR] "})
+	ts, err := StartTestCluster(t, 1, nil, logWriter{t: t, p: "[ZKERR] "})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -135,7 +135,7 @@ func TestIfAuthdataSurvivesReconnect(t *testing.T) {
 	// reconnect.
 	testNode := "/auth-testnode"
 
-	ts, err := StartTestCluster(1, nil, logWriter{t: t, p: "[ZKERR] "})
+	ts, err := StartTestCluster(t, 1, nil, logWriter{t: t, p: "[ZKERR] "})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -187,7 +187,7 @@ func TestMultiFailures(t *testing.T) {
 	const firstPath = "/gozk-test-first"
 	const secondPath = "/gozk-test-second"
 
-	ts, err := StartTestCluster(1, nil, logWriter{t: t, p: "[ZKERR] "})
+	ts, err := StartTestCluster(t, 1, nil, logWriter{t: t, p: "[ZKERR] "})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -230,7 +230,7 @@ func TestMultiFailures(t *testing.T) {
 }
 
 func TestGetSetACL(t *testing.T) {
-	ts, err := StartTestCluster(1, nil, logWriter{t: t, p: "[ZKERR] "})
+	ts, err := StartTestCluster(t, 1, nil, logWriter{t: t, p: "[ZKERR] "})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -284,7 +284,7 @@ func TestGetSetACL(t *testing.T) {
 }
 
 func TestAuth(t *testing.T) {
-	ts, err := StartTestCluster(1, nil, logWriter{t: t, p: "[ZKERR] "})
+	ts, err := StartTestCluster(t, 1, nil, logWriter{t: t, p: "[ZKERR] "})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -334,7 +334,7 @@ func TestAuth(t *testing.T) {
 }
 
 func TestChildren(t *testing.T) {
-	ts, err := StartTestCluster(1, nil, logWriter{t: t, p: "[ZKERR] "})
+	ts, err := StartTestCluster(t, 1, nil, logWriter{t: t, p: "[ZKERR] "})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -387,7 +387,7 @@ func TestChildren(t *testing.T) {
 }
 
 func TestChildWatch(t *testing.T) {
-	ts, err := StartTestCluster(1, nil, logWriter{t: t, p: "[ZKERR] "})
+	ts, err := StartTestCluster(t, 1, nil, logWriter{t: t, p: "[ZKERR] "})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -458,7 +458,7 @@ func TestChildWatch(t *testing.T) {
 }
 
 func TestSetWatchers(t *testing.T) {
-	ts, err := StartTestCluster(1, nil, logWriter{t: t, p: "[ZKERR] "})
+	ts, err := StartTestCluster(t, 1, nil, logWriter{t: t, p: "[ZKERR] "})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -601,7 +601,7 @@ func TestSetWatchers(t *testing.T) {
 }
 
 func TestExpiringWatch(t *testing.T) {
-	ts, err := StartTestCluster(1, nil, logWriter{t: t, p: "[ZKERR] "})
+	ts, err := StartTestCluster(t, 1, nil, logWriter{t: t, p: "[ZKERR] "})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -667,7 +667,7 @@ func TestRequestFail(t *testing.T) {
 }
 
 func TestSlowServer(t *testing.T) {
-	ts, err := StartTestCluster(1, nil, logWriter{t: t, p: "[ZKERR] "})
+	ts, err := StartTestCluster(t, 1, nil, logWriter{t: t, p: "[ZKERR] "})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -784,7 +784,7 @@ func startSlowProxy(t *testing.T, up, down Rate, upstream string, adj func(ln *L
 }
 
 func TestMaxBufferSize(t *testing.T) {
-	ts, err := StartTestCluster(1, nil, logWriter{t: t, p: "[ZKERR] "})
+	ts, err := StartTestCluster(t, 1, nil, logWriter{t: t, p: "[ZKERR] "})
 	if err != nil {
 		t.Fatal(err)
 	}
