@@ -128,13 +128,14 @@ func (sc ServerConfig) Marshall(w io.Writer) error {
 	// TODO: allow setting this
 	fmt.Fprintln(w, "reconfigEnabled=true")
 	fmt.Fprintln(w, "4lw.commands.whitelist=*")
-	fmt.Fprintln(w, "standaloneEnabled=false")
 
 	if len(sc.Servers) < 2 {
 		// if we dont have more than 2 servers we just dont specify server list to start in standalone mode
 		// see https://zookeeper.apache.org/doc/current/zookeeperStarted.html#sc_InstallingSingleMode for more details.
 		return nil
 	}
+	// if we then have more than one server force it to be distributed
+	fmt.Fprintln(w, "standaloneEnabled=false")
 
 	for _, srv := range sc.Servers {
 		if srv.PeerPort <= 0 {

@@ -29,7 +29,6 @@ script:
 matrix:
   allow_failures:
     - go: tip
-    - env: zk_version=3.5.4-beta
   fast_finish: true
 
 env:
