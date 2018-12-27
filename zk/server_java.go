@@ -35,20 +35,7 @@ type server struct {
 	cancelFunc context.CancelFunc
 }
 
-func New3dot4TestServer(t *testing.T, configPath string, stdout, stderr io.Writer) (*server, error) {
-	jarPath := findZookeeperFatJar()
-	if jarPath == "" {
-		return nil, fmt.Errorf("zk: unable to find server jar")
-	}
-
-	return &server{
-		cmdString: "java",
-		cmdArgs:   []string{"-jar", jarPath, "server", configPath},
-		stdout:    stdout, stderr: stderr,
-	}, nil
-}
-
-func New3dot5TestServer(t *testing.T, configPath string, stdout, stderr io.Writer) (*server, error) {
+func NewIntegrationTestServer(t *testing.T, configPath string, stdout, stderr io.Writer) (*server, error) {
 	zkPath := os.Getenv("ZOOKEEPER_BIN_PATH")
 	if zkPath == "" {
 		// default to a static reletive path that can be setup with a build system
@@ -143,30 +130,4 @@ func (sc ServerConfig) Marshall(w io.Writer) error {
 		}
 	}
 	return nil
-}
-
-var jarSearchPaths = []string{
-	"../zookeeper-*/build/contrib/fatjar/zookeeper-dev-fatjar.jar",
-	"../zookeeper-*/contrib/fatjar/zookeeper-*-fatjar.jar",
-	"/usr/share/java/zookeeper-*.jar",
-	"/usr/local/zookeeper-*/contrib/fatjar/zookeeper-*-fatjar.jar",
-	"/usr/local/Cellar/zookeeper/*/libexec/contrib/fatjar/zookeeper-*-fatjar.jar",
-}
-
-func findZookeeperFatJar() string {
-	var paths []string
-	zkPath := os.Getenv("ZOOKEEPER_PATH")
-	if zkPath == "" {
-		paths = jarSearchPaths
-	} else {
-		paths = []string{filepath.Join(zkPath, "contrib/fatjar/zookeeper-*-fatjar.jar")}
-	}
-	for _, path := range paths {
-		matches, _ := filepath.Glob(path)
-		// TODO: could sort by version and pick latest
-		if len(matches) > 0 {
-			return matches[0]
-		}
-	}
-	return ""
 }

@@ -31,23 +31,6 @@ func StartTestCluster(t *testing.T, size int, stdout, stderr io.Writer) (*TestCl
 	if testing.Short() {
 		t.Skip("ZK clsuter tests skipped in short case.")
 	}
-	var (
-		err error
-	)
-	// this will be set by systems like travis_ci to be able to test multiple versions
-	// testingServerVersion := os.Getenv("zk_version")
-	// if testingServerVersion != "" {
-	// 	// will look like a semver ie. 3.4.1 or 3.5.4-beta
-	// 	parts := strings.Split(testingServerVersion, ".")
-	// 	if len(parts) >= 2 {
-	// 		// minor version we switch on
-	// 		version, err = strconv.Atoi(parts[1])
-	// 		if err != nil {
-	// 			t.Fatalf("failed to detect zk minor version from environment: %v", err)
-	// 		}
-	// 	}
-	// }
-
 	tmpPath, err := ioutil.TempDir("", "gozk")
 	if err != nil {
 		t.Fatalf("failed to create tmp fir for test server setup: %v", err)
@@ -102,19 +85,10 @@ func StartTestCluster(t *testing.T, size int, stdout, stderr io.Writer) (*TestCl
 			return nil, err
 		}
 
-		var srv *server
-		// if version == 0 || version < 5 {
-		// 	// we default assume we want a 3.4 cluster
-		// 	srv, err = New3dot4TestServer(t, cfgPath, stdout, stderr)
-		// 	if err != nil {
-		// 		return nil, err
-		// 	}
-		// } else {
-		srv, err = New3dot5TestServer(t, cfgPath, stdout, stderr)
+		srv, err := NewIntegrationTestServer(t, cfgPath, stdout, stderr)
 		if err != nil {
 			return nil, err
 		}
-		// }
 
 		if err := srv.Start(); err != nil {
 			return nil, err
@@ -235,6 +209,10 @@ func (tc *TestCluster) StartAllServers() error {
 			return fmt.Errorf(
 				"Failed to start server listening on port `%d` : %+v", s.Port, err)
 		}
+	}
+
+	if err := tc.waitForStart(3, time.Second*5); err != nil {
+		return fmt.Errorf("failed to wait to startup zk servers: %v", err)
 	}
 
 	return nil
