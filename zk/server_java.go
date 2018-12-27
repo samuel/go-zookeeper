@@ -119,16 +119,21 @@ func (sc ServerConfig) Marshall(w io.Writer) error {
 		fmt.Fprintf(w, "autopurge.snapRetainCount=%d\n", sc.AutoPurgeSnapRetainCount)
 		fmt.Fprintf(w, "autopurge.purgeInterval=%d\n", sc.AutoPurgePurgeInterval)
 	}
-	if len(sc.Servers) > 0 {
-		for _, srv := range sc.Servers {
-			if srv.PeerPort <= 0 {
-				srv.PeerPort = DefaultPeerPort
-			}
-			if srv.LeaderElectionPort <= 0 {
-				srv.LeaderElectionPort = DefaultLeaderElectionPort
-			}
-			fmt.Fprintf(w, "server.%d=%s:%d:%d\n", srv.ID, srv.Host, srv.PeerPort, srv.LeaderElectionPort)
+
+	if len(sc.Servers) < 2 {
+		// if we dont have more than 2 servers we just dont specify server list to start in standalone mode
+		// see https://zookeeper.apache.org/doc/current/zookeeperStarted.html#sc_InstallingSingleMode for more details.
+		return nil
+	}
+
+	for _, srv := range sc.Servers {
+		if srv.PeerPort <= 0 {
+			srv.PeerPort = DefaultPeerPort
 		}
+		if srv.LeaderElectionPort <= 0 {
+			srv.LeaderElectionPort = DefaultLeaderElectionPort
+		}
+		fmt.Fprintf(w, "server.%d=%s:%d:%d\n", srv.ID, srv.Host, srv.PeerPort, srv.LeaderElectionPort)
 	}
 	return nil
 }

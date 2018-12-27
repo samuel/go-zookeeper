@@ -4,6 +4,10 @@ ZK_VERSION ?= 3.4.12
 ZK = zookeeper-$(ZK_VERSION)
 ZK_URL = "https://archive.apache.org/dist/zookeeper/$(ZK)/$(ZK).tar.gz"
 
+PACKAGES := $(shell go list ./... | grep -v examples)
+
+.DEFAULT_GOAL := test
+
 $(ZK):
 	wget $(ZK_URL)
 	tar -zxf $(ZK).tar.gz
@@ -11,19 +15,25 @@ $(ZK):
 	# in the test code. this allows backward compatable testing.
 	ln -s $(ZK) zookeeper
 
-
-.PHONY: install-test-deps
-install-test-deps:
+.PHONY: install-covertools
+install-covertools:
 	go get github.com/mattn/goveralls
 	go get golang.org/x/tools/cmd/cover
 
-.PHONY: travis
-travis: $(ZK) install-test-deps
+.PHONY: setup
+setup: $(ZK) install-covertools
+
+.PHONY: lint
+lint:
+	go fmt ./...
+	go vet ./...
+
+.PHONY: build
+build:
+	go build ./...
 
 .PHONY: test
-test:
-	go test -timeout 300s -v ./...
-	go test -timeout 400s -v -i -race ./...
-	go test -timeout 400s -v -race -covermode atomic -coverprofile=profile.cov ./zk
+test: build
+	go test -timeout 300s -v -race -covermode atomic -coverprofile=profile.cov $(PACKAGES)
 	# ignore if we fail to publish coverage
 	-goveralls -coverprofile=profile.cov -service=travis-ci

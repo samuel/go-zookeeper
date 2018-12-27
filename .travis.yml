@@ -17,16 +17,14 @@ branches:
     - dev
 
 before_install:
-  - make travis ZK_VERSION=${zk_version}
+  - make setup ZK_VERSION=${zk_version}
 
 before_script:
-  - go vet ./...
-  - go fmt ./...
+  - make lint
 
 script:
   - jdk_switcher use oraclejdk9
-  - go build ./...
-  - make test
+  - make
 
 matrix:
   allow_failures:
