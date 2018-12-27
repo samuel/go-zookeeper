@@ -154,6 +154,7 @@ func (tc *TestCluster) waitForStart(maxRetry int, interval time.Duration) error 
 		}
 		time.Sleep(interval)
 	}
+
 	return fmt.Errorf("unable to verify health of servers")
 }
 
@@ -211,7 +212,7 @@ func (tc *TestCluster) StartAllServers() error {
 		}
 	}
 
-	if err := tc.waitForStart(3, time.Second*5); err != nil {
+	if err := tc.waitForStart(5, time.Second); err != nil {
 		return fmt.Errorf("failed to wait to startup zk servers: %v", err)
 	}
 
@@ -224,6 +225,10 @@ func (tc *TestCluster) StopAllServers() error {
 			return fmt.Errorf(
 				"Failed to stop server listening on port `%d` : %+v", s.Port, err)
 		}
+	}
+
+	if err := tc.waitForStop(5, time.Second); err != nil {
+		return fmt.Errorf("failed to wait to startup zk servers: %v", err)
 	}
 
 	return nil

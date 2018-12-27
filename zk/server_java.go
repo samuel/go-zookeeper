@@ -36,6 +36,7 @@ type server struct {
 }
 
 func NewIntegrationTestServer(t *testing.T, configPath string, stdout, stderr io.Writer) (*server, error) {
+	// allow external systems to configure this zk server bin path.
 	zkPath := os.Getenv("ZOOKEEPER_BIN_PATH")
 	if zkPath == "" {
 		// default to a static reletive path that can be setup with a build system

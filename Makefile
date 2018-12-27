@@ -8,9 +8,8 @@ $(ZK):
 	wget $(ZK_URL)
 	tar -zxf $(ZK).tar.gz
 	# we link to a standard directory path so then the tests dont need to find based on version
+	# in the test code. this allows backward compatable testing.
 	ln -s $(ZK) zookeeper
-	# in older versions we use the zk fatjar and need to remove the signature from the jar to run it.
-	-zip -d zookeeper/contrib/fatjar/zookeeper-${zk_version}-fatjar.jar 'META-INF/*.SF' 'META-INF/*.DSA'
 
 
 .PHONY: install-test-deps
