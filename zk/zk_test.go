@@ -98,6 +98,13 @@ func TestCreate(t *testing.T) {
 }
 
 func TestIncrementalReconfig(t *testing.T) {
+	if val, ok := os.LookupEnv("zk_version"); ok {
+		if !strings.HasPrefix(val, "3.5") {
+			t.Skip("running with zookeeper that does not support this api")
+		}
+	} else {
+		t.Skip("did not detect zk_version from env. skipping reconfig test")
+	}
 	ts, err := StartTestCluster(t, 3, nil, logWriter{t: t, p: "[ZKERR] "})
 	requireNoError(t, err, "failed to setup test cluster")
 	defer ts.Stop()
@@ -178,6 +185,14 @@ func TestIncrementalReconfig(t *testing.T) {
 }
 
 func TestReconfg(t *testing.T) {
+	if val, ok := os.LookupEnv("zk_version"); ok {
+		if !strings.HasPrefix(val, "3.5") {
+			t.Skip("running with zookeeper that does not support this api")
+		}
+	} else {
+		t.Skip("did not detect zk_version from env. skipping reconfig test")
+	}
+
 	// This test enures we can do an non-incremental reconfig
 	ts, err := StartTestCluster(t, 3, nil, logWriter{t: t, p: "[ZKERR] "})
 	requireNoError(t, err, "failed to setup test cluster")
