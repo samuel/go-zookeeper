@@ -1,11 +1,13 @@
 package zk
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"testing"
 )
 
 type ErrMissingServerConfigField string
@@ -22,6 +24,51 @@ const (
 	DefaultPeerPort                       = 2888
 	DefaultLeaderElectionPort             = 3888
 )
+
+type server struct {
+	stdout, stderr io.Writer
+	cmdString      string
+	cmdArgs        []string
+
+	cmd *exec.Cmd
+	// this cancel will kill the command being run in this case the server itself.
+	cancelFunc context.CancelFunc
+}
+
+func NewIntegrationTestServer(t *testing.T, configPath string, stdout, stderr io.Writer) (*server, error) {
+	// allow external systems to configure this zk server bin path.
+	zkPath := os.Getenv("ZOOKEEPER_BIN_PATH")
+	if zkPath == "" {
+		// default to a static reletive path that can be setup with a build system
+		zkPath = "../zookeeper/bin"
+	}
+	if _, err := os.Stat(zkPath); err != nil {
+		if os.IsNotExist(err) {
+			return nil, fmt.Errorf("zk: could not find testing zookeeper bin path at %q: %v ", zkPath, err)
+		}
+	}
+
+	return &server{
+		cmdString: filepath.Join(zkPath, "zkServer.sh"),
+		cmdArgs:   []string{"start-foreground", configPath},
+		stdout:    stdout, stderr: stderr,
+	}, nil
+}
+
+func (srv *server) Start() error {
+	ctx, cancel := context.WithCancel(context.Background())
+	srv.cancelFunc = cancel
+
+	srv.cmd = exec.CommandContext(ctx, srv.cmdString, srv.cmdArgs...)
+	srv.cmd.Stdout = srv.stdout
+	srv.cmd.Stderr = srv.stderr
+	return srv.cmd.Start()
+}
+
+func (srv *server) Stop() error {
+	srv.cancelFunc()
+	return srv.cmd.Wait()
+}
 
 type ServerConfigServer struct {
 	ID                 int
@@ -42,6 +89,9 @@ type ServerConfig struct {
 }
 
 func (sc ServerConfig) Marshall(w io.Writer) error {
+	// the admin server is not wanted in test cases as it slows the startup process and is
+	// of little unit test value.
+	fmt.Fprintln(w, "admin.enableServer=false")
 	if sc.DataDir == "" {
 		return ErrMissingServerConfigField("dataDir")
 	}
@@ -81,56 +131,4 @@ func (sc ServerConfig) Marshall(w io.Writer) error {
 		}
 	}
 	return nil
-}
-
-var jarSearchPaths = []string{
-	"zookeeper-*/contrib/fatjar/zookeeper-*-fatjar.jar",
-	"../zookeeper-*/contrib/fatjar/zookeeper-*-fatjar.jar",
-	"/usr/share/java/zookeeper-*.jar",
-	"/usr/local/zookeeper-*/contrib/fatjar/zookeeper-*-fatjar.jar",
-	"/usr/local/Cellar/zookeeper/*/libexec/contrib/fatjar/zookeeper-*-fatjar.jar",
-}
-
-func findZookeeperFatJar() string {
-	var paths []string
-	zkPath := os.Getenv("ZOOKEEPER_PATH")
-	if zkPath == "" {
-		paths = jarSearchPaths
-	} else {
-		paths = []string{filepath.Join(zkPath, "contrib/fatjar/zookeeper-*-fatjar.jar")}
-	}
-	for _, path := range paths {
-		matches, _ := filepath.Glob(path)
-		// TODO: could sort by version and pick latest
-		if len(matches) > 0 {
-			return matches[0]
-		}
-	}
-	return ""
-}
-
-type Server struct {
-	JarPath        string
-	ConfigPath     string
-	Stdout, Stderr io.Writer
-
-	cmd *exec.Cmd
-}
-
-func (srv *Server) Start() error {
-	if srv.JarPath == "" {
-		srv.JarPath = findZookeeperFatJar()
-		if srv.JarPath == "" {
-			return fmt.Errorf("zk: unable to find server jar")
-		}
-	}
-	srv.cmd = exec.Command("java", "-jar", srv.JarPath, "server", srv.ConfigPath)
-	srv.cmd.Stdout = srv.Stdout
-	srv.cmd.Stderr = srv.Stderr
-	return srv.cmd.Start()
-}
-
-func (srv *Server) Stop() error {
-	srv.cmd.Process.Signal(os.Kill)
-	return srv.cmd.Wait()
 }

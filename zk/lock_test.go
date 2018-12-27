@@ -6,7 +6,7 @@ import (
 )
 
 func TestLock(t *testing.T) {
-	ts, err := StartTestCluster(1, nil, logWriter{t: t, p: "[ZKERR] "})
+	ts, err := StartTestCluster(t, 1, nil, logWriter{t: t, p: "[ZKERR] "})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -64,11 +64,12 @@ func TestLock(t *testing.T) {
 // This tests creating a lock with a path that's more than 1 node deep (e.g. "/test-multi-level/lock"),
 // when a part of that path already exists (i.e. "/test-multi-level" node already exists).
 func TestMultiLevelLock(t *testing.T) {
-	ts, err := StartTestCluster(1, nil, logWriter{t: t, p: "[ZKERR] "})
+	ts, err := StartTestCluster(t, 1, nil, logWriter{t: t, p: "[ZKERR] "})
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer ts.Stop()
+
 	zk, _, err := ts.ConnectAll()
 	if err != nil {
 		t.Fatalf("Connect returned error: %+v", err)
