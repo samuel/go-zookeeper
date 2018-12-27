@@ -17,7 +17,7 @@ func (e ErrMissingServerConfigField) Error() string {
 }
 
 const (
-	DefaultServerTickTime                 = 2000
+	DefaultServerTickTime                 = 500
 	DefaultServerInitLimit                = 10
 	DefaultServerSyncLimit                = 5
 	DefaultServerAutoPurgeSnapRetainCount = 3
@@ -29,8 +29,8 @@ type server struct {
 	stdout, stderr io.Writer
 	cmdString      string
 	cmdArgs        []string
-
-	cmd *exec.Cmd
+	cmdEnv         []string
+	cmd            *exec.Cmd
 	// this cancel will kill the command being run in this case the server itself.
 	cancelFunc context.CancelFunc
 }
@@ -47,10 +47,13 @@ func NewIntegrationTestServer(t *testing.T, configPath string, stdout, stderr io
 			return nil, fmt.Errorf("zk: could not find testing zookeeper bin path at %q: %v ", zkPath, err)
 		}
 	}
+	// password is 'test'
+	superString := `SERVER_JVMFLAGS=-Dzookeeper.DigestAuthenticationProvider.superDigest=super:D/InIHSb7yEEbrWz8b9l71RjZJU=`
 
 	return &server{
 		cmdString: filepath.Join(zkPath, "zkServer.sh"),
 		cmdArgs:   []string{"start-foreground", configPath},
+		cmdEnv:    []string{superString},
 		stdout:    stdout, stderr: stderr,
 	}, nil
 }
@@ -62,6 +65,8 @@ func (srv *server) Start() error {
 	srv.cmd = exec.CommandContext(ctx, srv.cmdString, srv.cmdArgs...)
 	srv.cmd.Stdout = srv.stdout
 	srv.cmd.Stderr = srv.stderr
+
+	srv.cmd.Env = srv.cmdEnv
 	return srv.cmd.Start()
 }
 
@@ -119,6 +124,11 @@ func (sc ServerConfig) Marshall(w io.Writer) error {
 		fmt.Fprintf(w, "autopurge.snapRetainCount=%d\n", sc.AutoPurgeSnapRetainCount)
 		fmt.Fprintf(w, "autopurge.purgeInterval=%d\n", sc.AutoPurgePurgeInterval)
 	}
+	// enable reconfig.
+	// TODO: allow setting this
+	fmt.Fprintln(w, "reconfigEnabled=true")
+	fmt.Fprintln(w, "4lw.commands.whitelist=*")
+	fmt.Fprintln(w, "standaloneEnabled=false")
 
 	if len(sc.Servers) < 2 {
 		// if we dont have more than 2 servers we just dont specify server list to start in standalone mode
@@ -135,5 +145,24 @@ func (sc ServerConfig) Marshall(w io.Writer) error {
 		}
 		fmt.Fprintf(w, "server.%d=%s:%d:%d\n", srv.ID, srv.Host, srv.PeerPort, srv.LeaderElectionPort)
 	}
+	return nil
+}
+
+// this is a helper to wait for the zk connection to at least get to the HasSession state
+func waitForSession(ctx context.Context, eventChan <-chan Event) error {
+	select {
+	case event, ok := <-eventChan:
+		// The eventChan is used solely to determine when the ZK conn has
+		// stopped.
+		if !ok {
+			return fmt.Errorf("connection closed before state reached")
+		}
+		if event.State == StateHasSession {
+			return nil
+		}
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+
 	return nil
 }
