@@ -277,6 +277,18 @@ type multiResponse struct {
 	DoneHeader multiHeader
 }
 
+// zk version 3.5 reconfig API
+type reconfigRequest struct {
+	JoiningServers []byte
+	LeavingServers []byte
+	NewMembers     []byte
+	// curConfigId version of the current configuration
+	// optional - causes reconfiguration to return an error if configuration is no longer current
+	CurConfigId int64
+}
+
+type reconfigReponse getDataResponse
+
 func (r *multiRequest) Encode(buf []byte) (int, error) {
 	total := 0
 	for _, op := range r.Ops {
@@ -604,6 +616,8 @@ func requestStructForOp(op int32) interface{} {
 		return &CheckVersionRequest{}
 	case opMulti:
 		return &multiRequest{}
+	case opReconfig:
+		return &reconfigRequest{}
 	}
 	return nil
 }

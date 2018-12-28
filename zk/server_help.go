@@ -12,18 +12,25 @@ import (
 	"time"
 )
 
+const (
+	_testConfigName   = "zoo.cfg"
+	_testMyIDFileName = "myid"
+)
+
 func init() {
 	rand.Seed(time.Now().UnixNano())
 }
 
 type TestServer struct {
-	Port int
-	Path string
-	Srv  *server
+	Port   int
+	Path   string
+	Srv    *server
+	Config ServerConfigServer
 }
 
 type TestCluster struct {
 	Path    string
+	Config  ServerConfig
 	Servers []TestServer
 }
 
@@ -32,22 +39,22 @@ func StartTestCluster(t *testing.T, size int, stdout, stderr io.Writer) (*TestCl
 		t.Skip("ZK clsuter tests skipped in short case.")
 	}
 	tmpPath, err := ioutil.TempDir("", "gozk")
-	if err != nil {
-		t.Fatalf("failed to create tmp fir for test server setup: %v", err)
-	}
+	requireNoError(t, err, "failed to create tmp dir for test server setup")
 
 	success := false
 	startPort := int(rand.Int31n(6000) + 10000)
 	cluster := &TestCluster{Path: tmpPath}
+
 	defer func() {
 		if !success {
 			cluster.Stop()
 		}
 	}()
+
 	for serverN := 0; serverN < size; serverN++ {
-		srvPath := filepath.Join(tmpPath, fmt.Sprintf("srv%d", serverN))
+		srvPath := filepath.Join(tmpPath, fmt.Sprintf("srv%d", serverN+1))
 		if err := os.Mkdir(srvPath, 0700); err != nil {
-			t.Fatalf("failed to make server path: %v", err)
+			requireNoError(t, err, "failed to make server path")
 		}
 
 		port := startPort + serverN*3
@@ -55,63 +62,59 @@ func StartTestCluster(t *testing.T, size int, stdout, stderr io.Writer) (*TestCl
 			ClientPort: port,
 			DataDir:    srvPath,
 		}
+
 		for i := 0; i < size; i++ {
-			cfg.Servers = append(cfg.Servers, ServerConfigServer{
+			serverNConfig := ServerConfigServer{
 				ID:                 i + 1,
 				Host:               "127.0.0.1",
 				PeerPort:           startPort + i*3 + 1,
 				LeaderElectionPort: startPort + i*3 + 2,
-			})
+			}
+
+			cfg.Servers = append(cfg.Servers, serverNConfig)
 		}
 
-		cfgPath := filepath.Join(srvPath, "zoo.cfg")
+		cfgPath := filepath.Join(srvPath, _testConfigName)
 		fi, err := os.Create(cfgPath)
-		if err != nil {
-			return nil, err
-		}
-		err = cfg.Marshall(fi)
-		fi.Close()
-		if err != nil {
-			return nil, err
-		}
+		requireNoError(t, err)
 
-		fi, err = os.Create(filepath.Join(srvPath, "myid"))
-		if err != nil {
-			return nil, err
-		}
+		requireNoError(t, cfg.Marshall(fi))
+		fi.Close()
+
+		fi, err = os.Create(filepath.Join(srvPath, _testMyIDFileName))
+		requireNoError(t, err)
+
 		_, err = fmt.Fprintf(fi, "%d\n", serverN+1)
 		fi.Close()
-		if err != nil {
-			return nil, err
-		}
+		requireNoError(t, err)
 
 		srv, err := NewIntegrationTestServer(t, cfgPath, stdout, stderr)
-		if err != nil {
-			return nil, err
-		}
+		requireNoError(t, err)
 
 		if err := srv.Start(); err != nil {
 			return nil, err
 		}
 
 		cluster.Servers = append(cluster.Servers, TestServer{
-			Path: srvPath,
-			Port: cfg.ClientPort,
-			Srv:  srv,
+			Path:   srvPath,
+			Port:   cfg.ClientPort,
+			Srv:    srv,
+			Config: cfg.Servers[serverN],
 		})
+		cluster.Config = cfg
 	}
 
-	if err := cluster.waitForStart(20, time.Second); err != nil {
+	if err := cluster.waitForStart(30, time.Second); err != nil {
 		return nil, err
 	}
 
 	success = true
+
 	return cluster, nil
 }
 
-func (tc *TestCluster) Connect(idx int) (*Conn, error) {
-	zk, _, err := Connect([]string{fmt.Sprintf("127.0.0.1:%d", tc.Servers[idx].Port)}, time.Second*15)
-	return zk, err
+func (tc *TestCluster) Connect(idx int) (*Conn, <-chan Event, error) {
+	return Connect([]string{fmt.Sprintf("127.0.0.1:%d", tc.Servers[idx].Port)}, time.Second*15)
 }
 
 func (tc *TestCluster) ConnectAll() (*Conn, <-chan Event, error) {
@@ -191,7 +194,7 @@ func (tc *TestCluster) StartServer(server string) {
 			return
 		}
 	}
-	panic(fmt.Sprintf("Unknown server: %s", server))
+	panic(fmt.Sprintf("unknown server: %s", server))
 }
 
 func (tc *TestCluster) StopServer(server string) {
@@ -201,18 +204,17 @@ func (tc *TestCluster) StopServer(server string) {
 			return
 		}
 	}
-	panic(fmt.Sprintf("Unknown server: %s", server))
+	panic(fmt.Sprintf("unknown server: %s", server))
 }
 
 func (tc *TestCluster) StartAllServers() error {
 	for _, s := range tc.Servers {
 		if err := s.Srv.Start(); err != nil {
-			return fmt.Errorf(
-				"Failed to start server listening on port `%d` : %+v", s.Port, err)
+			return fmt.Errorf("failed to start server listening on port `%d` : %+v", s.Port, err)
 		}
 	}
 
-	if err := tc.waitForStart(5, time.Second); err != nil {
+	if err := tc.waitForStart(10, time.Second*2); err != nil {
 		return fmt.Errorf("failed to wait to startup zk servers: %v", err)
 	}
 
@@ -220,11 +222,14 @@ func (tc *TestCluster) StartAllServers() error {
 }
 
 func (tc *TestCluster) StopAllServers() error {
+	var err error
 	for _, s := range tc.Servers {
 		if err := s.Srv.Stop(); err != nil {
-			return fmt.Errorf(
-				"Failed to stop server listening on port `%d` : %+v", s.Port, err)
+			err = fmt.Errorf("failed to stop server listening on port `%d` : %v", s.Port, err)
 		}
+	}
+	if err != nil {
+		return err
 	}
 
 	if err := tc.waitForStop(5, time.Second); err != nil {
@@ -232,4 +237,11 @@ func (tc *TestCluster) StopAllServers() error {
 	}
 
 	return nil
+}
+
+func requireNoError(t *testing.T, err error, msgAndArgs ...interface{}) {
+	if err != nil {
+		t.Logf("received unexpected error: %v", err)
+		t.Fatal(msgAndArgs...)
+	}
 }

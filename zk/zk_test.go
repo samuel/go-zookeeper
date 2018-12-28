@@ -1,11 +1,15 @@
 package zk
 
 import (
-	"crypto/rand"
+	"context"
 	"encoding/hex"
 	"fmt"
 	"io"
+	"io/ioutil"
+	"math/rand"
 	"net"
+	"os"
+	"path/filepath"
 	"reflect"
 	"regexp"
 	"sort"
@@ -91,6 +95,153 @@ func TestCreate(t *testing.T) {
 	} else if len(data) < 4 {
 		t.Fatal("Get returned wrong size data")
 	}
+}
+
+func TestIncrementalReconfig(t *testing.T) {
+	if val, ok := os.LookupEnv("zk_version"); ok {
+		if !strings.HasPrefix(val, "3.5") {
+			t.Skip("running with zookeeper that does not support this api")
+		}
+	} else {
+		t.Skip("did not detect zk_version from env. skipping reconfig test")
+	}
+	ts, err := StartTestCluster(t, 3, nil, logWriter{t: t, p: "[ZKERR] "})
+	requireNoError(t, err, "failed to setup test cluster")
+	defer ts.Stop()
+
+	// start and add a new server.
+	tmpPath, err := ioutil.TempDir("", "gozk")
+	requireNoError(t, err, "failed to create tmp dir for test server setup")
+	defer os.RemoveAll(tmpPath)
+
+	startPort := int(rand.Int31n(6000) + 10000)
+
+	srvPath := filepath.Join(tmpPath, fmt.Sprintf("srv4"))
+	if err := os.Mkdir(srvPath, 0700); err != nil {
+		requireNoError(t, err, "failed to make server path")
+	}
+	testSrvConfig := ServerConfigServer{
+		ID:                 4,
+		Host:               "127.0.0.1",
+		PeerPort:           startPort + 1,
+		LeaderElectionPort: startPort + 2,
+	}
+	cfg := ServerConfig{
+		ClientPort: startPort,
+		DataDir:    srvPath,
+		Servers:    []ServerConfigServer{testSrvConfig},
+	}
+
+	// TODO: clean all this server creating up to a better helper method
+	cfgPath := filepath.Join(srvPath, _testConfigName)
+	fi, err := os.Create(cfgPath)
+	requireNoError(t, err)
+
+	requireNoError(t, cfg.Marshall(fi))
+	fi.Close()
+
+	fi, err = os.Create(filepath.Join(srvPath, _testMyIDFileName))
+	requireNoError(t, err)
+
+	_, err = fmt.Fprintln(fi, "4")
+	fi.Close()
+	requireNoError(t, err)
+
+	testServer, err := NewIntegrationTestServer(t, cfgPath, nil, nil)
+	requireNoError(t, err)
+	requireNoError(t, testServer.Start())
+	defer testServer.Stop()
+
+	zk, events, err := ts.ConnectAll()
+	requireNoError(t, err, "failed to connect to cluster")
+	defer zk.Close()
+
+	err = zk.AddAuth("digest", []byte("super:test"))
+	requireNoError(t, err, "failed to auth to cluster")
+
+	waitCtx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+
+	err = waitForSession(waitCtx, events)
+	requireNoError(t, err, "failed to wail for session")
+
+	_, _, err = zk.Get("/zookeeper/config")
+	if err != nil {
+		t.Fatalf("get config returned error: %+v", err)
+	}
+
+	// initially should be 1<<32, which is 0x100000000. This is the zxid
+	// of the first NEWLEADER message, used as the inital version
+	// reflect.DeepEqual(bytes.Split(data, []byte("\n")), []byte("version=100000000"))
+
+	// remove node 3.
+	_, err = zk.IncrementalReconfig(nil, []string{"3"}, -1)
+	if err != nil && err == ErrConnectionClosed {
+		t.Log("conneciton closed is fine since the cluster re-elects and we dont reconnect")
+	} else {
+		requireNoError(t, err, "failed to remove node from cluster")
+	}
+
+	// add node a new 4th node
+	server := fmt.Sprintf("server.%d=%s:%d:%d;%d", testSrvConfig.ID, testSrvConfig.Host, testSrvConfig.PeerPort, testSrvConfig.LeaderElectionPort, cfg.ClientPort)
+	_, err = zk.IncrementalReconfig([]string{server}, nil, -1)
+	if err != nil && err == ErrConnectionClosed {
+		t.Log("conneciton closed is fine since the cluster re-elects and we dont reconnect")
+	} else {
+		requireNoError(t, err, "failed to add new server to cluster")
+	}
+}
+
+func TestReconfig(t *testing.T) {
+	if val, ok := os.LookupEnv("zk_version"); ok {
+		if !strings.HasPrefix(val, "3.5") {
+			t.Skip("running with zookeeper that does not support this api")
+		}
+	} else {
+		t.Skip("did not detect zk_version from env. skipping reconfig test")
+	}
+
+	// This test enures we can do an non-incremental reconfig
+	ts, err := StartTestCluster(t, 3, nil, logWriter{t: t, p: "[ZKERR] "})
+	requireNoError(t, err, "failed to setup test cluster")
+	defer ts.Stop()
+
+	zk, events, err := ts.ConnectAll()
+	requireNoError(t, err, "failed to connect to cluster")
+	defer zk.Close()
+
+	err = zk.AddAuth("digest", []byte("super:test"))
+	requireNoError(t, err, "failed to auth to cluster")
+
+	waitCtx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+
+	err = waitForSession(waitCtx, events)
+	requireNoError(t, err, "failed to wail for session")
+
+	_, _, err = zk.Get("/zookeeper/config")
+	if err != nil {
+		t.Fatalf("get config returned error: %+v", err)
+	}
+
+	// essentially remove the first node
+	var s []string
+	for _, host := range ts.Config.Servers[1:] {
+		s = append(s, fmt.Sprintf("server.%d=%s:%d:%d;%d\n", host.ID, host.Host, host.PeerPort, host.LeaderElectionPort, ts.Config.ClientPort))
+	}
+
+	_, err = zk.Reconfig(s, -1)
+	requireNoError(t, err, "failed to reconfig cluster")
+
+	// reconfig to all the hosts again
+	s = []string{}
+	for _, host := range ts.Config.Servers {
+		s = append(s, fmt.Sprintf("server.%d=%s:%d:%d;%d\n", host.ID, host.Host, host.PeerPort, host.LeaderElectionPort, ts.Config.ClientPort))
+	}
+
+	_, err = zk.Reconfig(s, -1)
+	requireNoError(t, err, "failed to reconfig cluster")
+
 }
 
 func TestMulti(t *testing.T) {
@@ -725,64 +876,6 @@ func TestSlowServer(t *testing.T) {
 	}
 }
 
-func startSlowProxy(t *testing.T, up, down Rate, upstream string, adj func(ln *Listener)) (string, chan bool, error) {
-	ln, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		return "", nil, err
-	}
-	tln := &Listener{
-		Listener: ln,
-		Up:       up,
-		Down:     down,
-	}
-	stopCh := make(chan bool)
-	go func() {
-		<-stopCh
-		tln.Close()
-	}()
-	go func() {
-		for {
-			cn, err := tln.Accept()
-			if err != nil {
-				if !strings.Contains(err.Error(), "use of closed network connection") {
-					t.Fatalf("Accept failed: %s", err.Error())
-				}
-				return
-			}
-			if adj != nil {
-				adj(tln)
-			}
-			go func(cn net.Conn) {
-				defer cn.Close()
-				upcn, err := net.Dial("tcp", upstream)
-				if err != nil {
-					t.Log(err)
-					return
-				}
-				// This will leave hanging goroutines util stopCh is closed
-				// but it doesn't matter in the context of running tests.
-				go func() {
-					<-stopCh
-					upcn.Close()
-				}()
-				go func() {
-					if _, err := io.Copy(upcn, cn); err != nil {
-						if !strings.Contains(err.Error(), "use of closed network connection") {
-							// log.Printf("Upstream write failed: %s", err.Error())
-						}
-					}
-				}()
-				if _, err := io.Copy(cn, upcn); err != nil {
-					if !strings.Contains(err.Error(), "use of closed network connection") {
-						// log.Printf("Upstream read failed: %s", err.Error())
-					}
-				}
-			}(cn)
-		}
-	}()
-	return ln.Addr().String(), stopCh, nil
-}
-
 func TestMaxBufferSize(t *testing.T) {
 	ts, err := StartTestCluster(t, 1, nil, logWriter{t: t, p: "[ZKERR] "})
 	if err != nil {
@@ -887,6 +980,64 @@ func TestMaxBufferSize(t *testing.T) {
 	if !reflect.DeepEqual(resultChildren, children) {
 		t.Fatalf("Children returned unexpected names; expecting %+v, got %+v", children, resultChildren)
 	}
+}
+
+func startSlowProxy(t *testing.T, up, down Rate, upstream string, adj func(ln *Listener)) (string, chan bool, error) {
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		return "", nil, err
+	}
+	tln := &Listener{
+		Listener: ln,
+		Up:       up,
+		Down:     down,
+	}
+	stopCh := make(chan bool)
+	go func() {
+		<-stopCh
+		tln.Close()
+	}()
+	go func() {
+		for {
+			cn, err := tln.Accept()
+			if err != nil {
+				if !strings.Contains(err.Error(), "use of closed network connection") {
+					t.Fatalf("Accept failed: %s", err.Error())
+				}
+				return
+			}
+			if adj != nil {
+				adj(tln)
+			}
+			go func(cn net.Conn) {
+				defer cn.Close()
+				upcn, err := net.Dial("tcp", upstream)
+				if err != nil {
+					t.Log(err)
+					return
+				}
+				// This will leave hanging goroutines util stopCh is closed
+				// but it doesn't matter in the context of running tests.
+				go func() {
+					<-stopCh
+					upcn.Close()
+				}()
+				go func() {
+					if _, err := io.Copy(upcn, cn); err != nil {
+						if !strings.Contains(err.Error(), "use of closed network connection") {
+							// log.Printf("Upstream write failed: %s", err.Error())
+						}
+					}
+				}()
+				if _, err := io.Copy(cn, upcn); err != nil {
+					if !strings.Contains(err.Error(), "use of closed network connection") {
+						// log.Printf("Upstream read failed: %s", err.Error())
+					}
+				}
+			}(cn)
+		}
+	}()
+	return ln.Addr().String(), stopCh, nil
 }
 
 func expectErr(t *testing.T, err error, expected error) {
