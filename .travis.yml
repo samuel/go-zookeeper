@@ -14,7 +14,6 @@ sudo: false
 branches:
   only:
     - master
-    - dev
 
 before_install:
   - make setup ZK_VERSION=${zk_version}

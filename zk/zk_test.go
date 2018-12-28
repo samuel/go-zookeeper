@@ -176,15 +176,23 @@ func TestIncrementalReconfig(t *testing.T) {
 
 	// remove node 3.
 	_, err = zk.IncrementalReconfig(nil, []string{"3"}, -1)
-	requireNoError(t, err, "failed to remove node from cluster")
+	if err != nil && err == ErrConnectionClosed {
+		t.Log("conneciton closed is fine since the cluster re-elects and we dont reconnect")
+	} else {
+		requireNoError(t, err, "failed to remove node from cluster")
+	}
 
 	// add node a new 4th node
 	server := fmt.Sprintf("server.%d=%s:%d:%d;%d", testSrvConfig.ID, testSrvConfig.Host, testSrvConfig.PeerPort, testSrvConfig.LeaderElectionPort, cfg.ClientPort)
 	_, err = zk.IncrementalReconfig([]string{server}, nil, -1)
-	requireNoError(t, err, "failed to add new server to cluster")
+	if err != nil && err == ErrConnectionClosed {
+		t.Log("conneciton closed is fine since the cluster re-elects and we dont reconnect")
+	} else {
+		requireNoError(t, err, "failed to add new server to cluster")
+	}
 }
 
-func TestReconfg(t *testing.T) {
+func TestReconfig(t *testing.T) {
 	if val, ok := os.LookupEnv("zk_version"); ok {
 		if !strings.HasPrefix(val, "3.5") {
 			t.Skip("running with zookeeper that does not support this api")
