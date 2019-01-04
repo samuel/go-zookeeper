@@ -36,7 +36,7 @@ type TestCluster struct {
 
 func StartTestCluster(t *testing.T, size int, stdout, stderr io.Writer) (*TestCluster, error) {
 	if testing.Short() {
-		t.Skip("ZK clsuter tests skipped in short case.")
+		t.Skip("ZK cluster tests skipped in short case.")
 	}
 	tmpPath, err := ioutil.TempDir("", "gozk")
 	requireNoError(t, err, "failed to create tmp dir for test server setup")
