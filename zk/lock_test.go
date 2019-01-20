@@ -1,6 +1,10 @@
 package zk
 
 import (
+	"crypto/rand"
+	"encoding/base64"
+	"fmt"
+	"strings"
 	"testing"
 	"time"
 )
@@ -90,5 +94,35 @@ func TestMultiLevelLock(t *testing.T) {
 	}
 	if err := l.Unlock(); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestLockWithNameBuilder(t *testing.T) {
+	randomLockNameBytes := make([]byte, 10)
+	_, randomLockNameReadErr := rand.Read(randomLockNameBytes)
+	if nil != randomLockNameReadErr {
+		t.Fatal(randomLockNameReadErr)
+	}
+	randomLockName := base64.URLEncoding.EncodeToString(
+		randomLockNameBytes)
+
+	lockPath := "/lock-path"
+	lockPathEncoded := base64.URLEncoding.EncodeToString([]byte(lockPath))
+
+	lockNameBuilder := func(ctx LockNameBuilderContext) string {
+		buildName := fmt.Sprintf("%s-%s", randomLockName,
+			base64.URLEncoding.EncodeToString([]byte(ctx.Path)))
+		return buildName
+	}
+	l := NewLock(nil, lockPath, nil,
+		LockWithNameBuilder(lockNameBuilder))
+
+	if 0 > strings.Index(l.name, randomLockName) {
+		t.Fatal("did not detect built lock name")
+	}
+
+	if 0 > strings.Index(l.name, lockPathEncoded) {
+		t.Fatal("did not detect path was properly passed to lock "+
+			"name builder")
 	}
 }

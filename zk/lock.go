@@ -2,9 +2,13 @@ package zk
 
 import (
 	"errors"
-	"fmt"
+	"path"
 	"strconv"
 	"strings"
+)
+
+const (
+	defaultLockName = "lock-"
 )
 
 var (
@@ -12,7 +16,25 @@ var (
 	ErrDeadlock = errors.New("zk: trying to acquire a lock twice")
 	// ErrNotLocked is returned by Unlock when trying to release a lock that has not first be acquired.
 	ErrNotLocked = errors.New("zk: not locked")
+
+	defaultNewLockConstructorOptions = []LockConstructorOption{
+		LockWithNameBuilder(defaultLockNameBuilder),
+	}
 )
+
+// LockConstructorOption is used to provide optional constructor arguments to
+// the NewLock constructor
+type LockConstructorOption func(l *Lock)
+
+// LockNameBuilder is a function which, when provided with a LockNameContext,
+// will generate the name of the lock. While it is technically possible to
+// create a lock name with slashes, it is discouraged.
+//
+// This option may be useful in cases when using the lock implementation along
+// with other language implementations of Zookeeper locks. For instance, the
+// python kazoo library creates locks with the name "__lock__" while this
+// library uses "-lock-" by default.
+type LockNameBuilder func(lockNameCtx LockNameBuilderContext) string
 
 // Lock is a mutual exclusion lock.
 type Lock struct {
@@ -21,17 +43,49 @@ type Lock struct {
 	acl      []ACL
 	lockPath string
 	seq      int
+	name     string
+}
+
+// LockNameBuilderContext will be provided to any template specified in the
+// LockWithNameBuilder constructor option in order to generate the name for the
+// constructed lock
+type LockNameBuilderContext struct {
+	Path string
+}
+
+// LockWithNameBuilder creates a parameter which
+func LockWithNameBuilder(b LockNameBuilder) LockConstructorOption {
+	return func(l *Lock) {
+		ctx := LockNameBuilderContext{
+			Path: l.path,
+		}
+		l.name = b(ctx)
+	}
+}
+
+// defaultLockNameBuilder wraps the default lock name as a builder for use as a
+// default constructor option
+func defaultLockNameBuilder(_ LockNameBuilderContext) string {
+	return defaultLockName
 }
 
 // NewLock creates a new lock instance using the provided connection, path, and acl.
 // The path must be a node that is only used by this lock. A lock instances starts
 // unlocked until Lock() is called.
-func NewLock(c *Conn, path string, acl []ACL) *Lock {
-	return &Lock{
+func NewLock(c *Conn, path string, acl []ACL, opts... LockConstructorOption,
+	) *Lock {
+	created := &Lock{
 		c:    c,
 		path: path,
 		acl:  acl,
 	}
+
+	allOpts := append(defaultNewLockConstructorOptions, opts...)
+	for _, opt := range allOpts {
+		opt(created)
+	}
+
+	return created
 }
 
 func parseSeq(path string) (int, error) {
@@ -47,12 +101,12 @@ func (l *Lock) Lock() error {
 		return ErrDeadlock
 	}
 
-	prefix := fmt.Sprintf("%s/lock-", l.path)
+	prefix := path.Join(l.path, l.name)
 
-	path := ""
+	lockPath := ""
 	var err error
 	for i := 0; i < 3; i++ {
-		path, err = l.c.CreateProtectedEphemeralSequential(prefix, []byte{}, l.acl)
+		lockPath, err = l.c.CreateProtectedEphemeralSequential(prefix, []byte{}, l.acl)
 		if err == ErrNoNode {
 			// Create parent node.
 			parts := strings.Split(l.path, "/")
@@ -82,7 +136,7 @@ func (l *Lock) Lock() error {
 		return err
 	}
 
-	seq, err := parseSeq(path)
+	seq, err := parseSeq(lockPath)
 	if err != nil {
 		return err
 	}
@@ -131,7 +185,7 @@ func (l *Lock) Lock() error {
 	}
 
 	l.seq = seq
-	l.lockPath = path
+	l.lockPath = lockPath
 	return nil
 }
 
