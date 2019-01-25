@@ -23,6 +23,13 @@ func TestLock(t *testing.T) {
 	if err := l.Lock(); err != nil {
 		t.Fatal(err)
 	}
+
+	lockSequenceNumber := l.SequenceNumber()
+	if 0 == lockSequenceNumber {
+		t.Fatal("expected non-zero lock sequence number once " +
+			"initially acquired")
+	}
+
 	if err := l.Unlock(); err != nil {
 		t.Fatal(err)
 	}
