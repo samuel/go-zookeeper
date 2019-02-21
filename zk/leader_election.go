@@ -79,53 +79,57 @@ func (l *leaderElectorImpl) Start() (election chan struct{}, err error) {
 // setup watches, push to election chan when current process got elected
 // this func is meant to be kept running in a separate goroutine
 func (l *leaderElectorImpl) watchAndPipe(election chan struct{}) {
-	seq, err := parseSeq(l.nodePath, "")
-	if err != nil {
-		return
-	}
-
-	children, _, err := l.conn.Children(l.electionPath)
-	if err != nil {
-		return
-	}
-
-	lowestSeq := seq
-	prevSeq := -1
-	prevSeqPath := ""
-	for _, p := range children {
-		s, err := parseSeq(p, "")
+	// check up to 3 times for potential wins
+	for i := 1; i < 3; i++ {
+		seq, err := parseSeq(l.nodePath, "")
 		if err != nil {
 			return
 		}
-		if s < lowestSeq {
-			lowestSeq = s
+
+		children, _, err := l.conn.Children(l.electionPath)
+		if err != nil {
+			return
 		}
-		if s < seq && s > prevSeq {
-			prevSeq = s
-			prevSeqPath = p
+
+		lowestSeq := seq
+		prevSeq := -1
+		prevSeqPath := ""
+		for _, p := range children {
+			s, err := parseSeq(p, "")
+			if err != nil {
+				return
+			}
+			if s < lowestSeq {
+				lowestSeq = s
+			}
+			if s < seq && s > prevSeq {
+				prevSeq = s
+				prevSeqPath = p
+			}
 		}
-	}
 
-	if seq == lowestSeq {
-		// won election
-		election <- struct{}{}
-		return
-	}
+		if seq == lowestSeq {
+			// won election!
+			election <- struct{}{}
+			return
+		}
 
-	// Wait on the node next in line to be deleted
-	_, _, ch, err := l.conn.GetW(l.electionPath + "/" + prevSeqPath)
-	if err != nil && err != ErrNoNode {
-		return
-	}
+		// Wait on the node next in line to be deleted
+		_, _, ch, err := l.conn.GetW(l.electionPath + "/" + prevSeqPath)
+		if err != nil && err != ErrNoNode {
+			return
+		}
 
-	ev := <-ch
-	if ev.Err != nil {
-		err = ev.Err
-		return
-	}
-	if ev.Type == EventNodeDeleted {
-		// won election, don't need to check all children
-		election <- struct{}{}
+		ev := <-ch
+		if ev.Err != nil {
+			err = ev.Err
+			return
+		}
+		if ev.Type == EventNodeDeleted {
+			// previous node deleted, could be a win, check again to make sure
+			continue
+		}
+		break
 	}
 }
 
