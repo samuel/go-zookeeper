@@ -634,7 +634,7 @@ func (c *Conn) sendSetWatches() {
 			}
 			sizeSoFar = 28 // fixed overhead of a set-watches packet
 			req = &setWatchesRequest{
-				RelativeZxid: c.lastZxid,
+				RelativeZxid: atomic.LoadInt64(&c.lastZxid),
 				DataWatches:  make([]string, 0),
 				ExistWatches: make([]string, 0),
 				ChildWatches: make([]string, 0),
@@ -684,7 +684,7 @@ func (c *Conn) authenticate() error {
 	// Encode and send a connect request.
 	n, err := encodePacket(buf[4:], &connectRequest{
 		ProtocolVersion: protocolVersion,
-		LastZxidSeen:    c.lastZxid,
+		LastZxidSeen:    atomic.LoadInt64(&c.lastZxid),
 		TimeOut:         c.sessionTimeoutMs,
 		SessionID:       c.SessionID(),
 		Passwd:          c.passwd,
@@ -734,9 +734,9 @@ func (c *Conn) authenticate() error {
 		return err
 	}
 	if r.SessionID == 0 {
-		atomic.StoreInt64(&c.sessionID, int64(0))
+		atomic.StoreInt64(&c.sessionID, 0)
 		c.passwd = emptyPassword
-		c.lastZxid = 0
+		atomic.StoreInt64(&c.lastZxid, 0)
 		c.setState(StateExpired)
 		return ErrSessionExpired
 	}
@@ -907,7 +907,7 @@ func (c *Conn) recvLoop(conn net.Conn) error {
 			c.logger.Printf("Xid < 0 (%d) but not ping or watcher event", res.Xid)
 		} else {
 			if res.Zxid > 0 {
-				c.lastZxid = res.Zxid
+				atomic.StoreInt64(&c.lastZxid, res.Zxid)
 			}
 
 			c.requestsLock.Lock()
