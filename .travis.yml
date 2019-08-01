@@ -1,7 +1,7 @@
 language: go
 go:
-  - 1.11
-  - 1.9
+  - "1.11"
+  - "1.x"
   - tip
 
 go_import_path: github.com/samuel/go-zookeeper
