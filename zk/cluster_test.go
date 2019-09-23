@@ -150,7 +150,7 @@ func TestNoQuorum(t *testing.T) {
 	DefaultLogger.Printf("    Retrying no luck...")
 	var firstDisconnect *Event
 	begin := time.Now()
-	for time.Now().Sub(begin) < 6*time.Second {
+	for time.Since(begin) < 6*time.Second {
 		disconnectedEvent := sl.NewWatcher(sessionStateMatcher(StateDisconnected)).Wait(4 * time.Second)
 		if disconnectedEvent == nil {
 			t.Fatalf("Disconnected event expected")
