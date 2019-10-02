@@ -10,6 +10,7 @@ Possible watcher events:
 */
 
 import (
+	"context"
 	"crypto/rand"
 	"encoding/binary"
 	"errors"
@@ -312,7 +313,12 @@ func WithMaxConnBufferSize(maxBufferSize int) connOption {
 func (c *Conn) Close() {
 	close(c.shouldQuit)
 
-	<-c.queueRequestWithTimeout(opClose, &closeRequest{}, &closeResponse{}, nil, time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+
+	if _, err := c.queueRequestWithContext(ctx, opClose, &closeRequest{}, &closeResponse{}, nil); err != nil {
+		c.logger.Printf("Failed to close connection: %+v", err)
+	}
 }
 
 // State returns the current state of the connection.
@@ -961,7 +967,7 @@ func (c *Conn) queueRequest(opcode int32, req interface{}, res interface{}, recv
 	return rq.recvChan
 }
 
-func (c *Conn) queueRequestWithTimeout(opcode int32, req interface{}, res interface{}, recvFunc func(*request, *responseHeader, error), timeout time.Duration) <-chan response {
+func (c *Conn) queueRequestWithContext(ctx context.Context, opcode int32, req interface{}, res interface{}, recvFunc func(*request, *responseHeader, error)) (<-chan response, error) {
 	rq := &request{
 		xid:        c.nextXid(),
 		opcode:     opcode,
@@ -972,12 +978,12 @@ func (c *Conn) queueRequestWithTimeout(opcode int32, req interface{}, res interf
 	}
 
 	select {
-	case <-time.After(timeout):
+	case <-ctx.Done():
 		rq.recvChan <- response{err: ErrConnectionClosed}
+		return rq.recvChan, ctx.Err()
 	case c.sendChan <- rq:
+		return rq.recvChan, nil
 	}
-
-	return rq.recvChan
 }
 
 func (c *Conn) request(opcode int32, req interface{}, res interface{}, recvFunc func(*request, *responseHeader, error)) (int64, error) {
