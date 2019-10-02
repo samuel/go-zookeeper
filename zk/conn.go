@@ -312,10 +312,7 @@ func WithMaxConnBufferSize(maxBufferSize int) connOption {
 func (c *Conn) Close() {
 	close(c.shouldQuit)
 
-	select {
-	case <-c.queueRequest(opClose, &closeRequest{}, &closeResponse{}, nil):
-	case <-time.After(time.Second):
-	}
+	<-c.queueRequestWithTimeout(opClose, &closeRequest{}, &closeResponse{}, nil, time.Second)
 }
 
 // State returns the current state of the connection.
@@ -961,6 +958,25 @@ func (c *Conn) queueRequest(opcode int32, req interface{}, res interface{}, recv
 		recvFunc:   recvFunc,
 	}
 	c.sendChan <- rq
+	return rq.recvChan
+}
+
+func (c *Conn) queueRequestWithTimeout(opcode int32, req interface{}, res interface{}, recvFunc func(*request, *responseHeader, error), timeout time.Duration) <-chan response {
+	rq := &request{
+		xid:        c.nextXid(),
+		opcode:     opcode,
+		pkt:        req,
+		recvStruct: res,
+		recvChan:   make(chan response, 1),
+		recvFunc:   recvFunc,
+	}
+
+	select {
+	case <-time.After(timeout):
+		rq.recvChan <- response{err: ErrConnectionClosed}
+	case c.sendChan <- rq:
+	}
+
 	return rq.recvChan
 }
 
