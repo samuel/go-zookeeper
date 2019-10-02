@@ -979,8 +979,7 @@ func (c *Conn) queueRequestWithContext(ctx context.Context, opcode int32, req in
 
 	select {
 	case <-ctx.Done():
-		rq.recvChan <- response{err: ErrConnectionClosed}
-		return rq.recvChan, ctx.Err()
+		return nil, ctx.Err()
 	case c.sendChan <- rq:
 		return rq.recvChan, nil
 	}
