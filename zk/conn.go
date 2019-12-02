@@ -215,7 +215,7 @@ func Connect(servers []string, sessionTimeout time.Duration, options ...connOpti
 	return conn, ec, nil
 }
 
-func prepareConn(options []connOption, srvs []string, sessionTimeout time.Duration, tls bool, config *tls.Config) (chan Event, *Conn, error) {
+func prepareConn(options []connOption, srvs []string, sessionTimeout time.Duration, tlsEnabled bool, config *tls.Config) (chan Event, *Conn, error) {
 	ec := make(chan Event, eventChanSize)
 	conn := &Conn{
 		dialer:         net.DialTimeout,
@@ -232,7 +232,7 @@ func prepareConn(options []connOption, srvs []string, sessionTimeout time.Durati
 		logger:         DefaultLogger,
 		logInfo:        true, // default is true for backwards compatability
 		buf:            make([]byte, bufferSize),
-		enableTLS:      tls,
+		enableTLS:      tlsEnabled,
 		configTLS:      config,
 	}
 	// Set provided options.
@@ -915,7 +915,8 @@ func (c *Conn) recvLoop(conn net.Conn) error {
 			return err
 		}
 
-		if res.Xid == -1 {
+		switch {
+		case res.Xid == -1:
 			res := &watcherEvent{}
 			_, err := decodePacket(buf[16:blen], res)
 			if err != nil {
@@ -949,11 +950,11 @@ func (c *Conn) recvLoop(conn net.Conn) error {
 				}
 			}
 			c.watchersLock.Unlock()
-		} else if res.Xid == -2 {
+		case res.Xid == -2:
 			// Ping response. Ignore.
-		} else if res.Xid < 0 {
+		case res.Xid < 0:
 			c.logger.Printf("Xid < 0 (%d) but not ping or watcher event", res.Xid)
-		} else {
+		default:
 			if res.Zxid > 0 {
 				c.lastZxid = res.Zxid
 			}
