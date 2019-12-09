@@ -48,7 +48,7 @@ func NewIntegrationTestServer(t *testing.T, configPath string, stdout, stderr io
 		}
 	}
 	// password is 'test'
-	superString := `SERVER_JVMFLAGS=-Dzookeeper.DigestAuthenticationProvider.superDigest=super:D/InIHSb7yEEbrWz8b9l71RjZJU=`
+	superString := `SERVER_JVMFLAGS=-Dzookeeper.DigestAuthenticationProvider.superDigest=:D/InIHSb7yEEbrWz8b9l71RjZJU=`
 
 	return &server{
 		cmdString: filepath.Join(zkPath, "zkServer.sh"),
@@ -76,10 +76,12 @@ func (srv *server) Stop() error {
 }
 
 type ServerConfigServer struct {
-	ID                 int
-	Host               string
-	PeerPort           int
-	LeaderElectionPort int
+	ID                       int
+	Host                     string
+	PeerPort                 int
+	LeaderElectionPort       int
+	PeerPortSecure           int
+	LeaderElectionPortSecure int
 }
 
 type ServerConfig struct {
@@ -91,6 +93,7 @@ type ServerConfig struct {
 	AutoPurgeSnapRetainCount int    // Number of snapshots to retain in dataDir
 	AutoPurgePurgeInterval   int    // Purge task internal in hours (0 to disable auto purge)
 	Servers                  []ServerConfigServer
+	ClientPortSecure         int
 }
 
 func (sc ServerConfig) Marshall(w io.Writer) error {
@@ -117,6 +120,7 @@ func (sc ServerConfig) Marshall(w io.Writer) error {
 		sc.ClientPort = DefaultPort
 	}
 	fmt.Fprintf(w, "clientPort=%d\n", sc.ClientPort)
+	fmt.Fprintf(w, "secureClientPort=%d\n", sc.ClientPortSecure)
 	if sc.AutoPurgePurgeInterval > 0 {
 		if sc.AutoPurgeSnapRetainCount <= 0 {
 			sc.AutoPurgeSnapRetainCount = DefaultServerAutoPurgeSnapRetainCount

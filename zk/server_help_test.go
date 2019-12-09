@@ -1,6 +1,7 @@
 package zk
 
 import (
+	"crypto/tls"
 	"fmt"
 	"io"
 	"io/ioutil"
@@ -22,10 +23,11 @@ func init() {
 }
 
 type TestServer struct {
-	Port   int
-	Path   string
-	Srv    *server
-	Config ServerConfigServer
+	Port       int
+	PortSecure int
+	Path       string
+	Srv        *server
+	Config     ServerConfigServer
 }
 
 type TestCluster struct {
@@ -43,6 +45,7 @@ func StartTestCluster(t *testing.T, size int, stdout, stderr io.Writer) (*TestCl
 
 	success := false
 	startPort := int(rand.Int31n(6000) + 10000)
+	startPortSecure := int(rand.Int31n(6000) + 20000)
 	cluster := &TestCluster{Path: tmpPath}
 
 	defer func() {
@@ -58,17 +61,21 @@ func StartTestCluster(t *testing.T, size int, stdout, stderr io.Writer) (*TestCl
 		}
 
 		port := startPort + serverN*3
+		protSecure := startPort + serverN*3
 		cfg := ServerConfig{
-			ClientPort: port,
-			DataDir:    srvPath,
+			ClientPort:       port,
+			ClientPortSecure: protSecure,
+			DataDir:          srvPath,
 		}
 
 		for i := 0; i < size; i++ {
 			serverNConfig := ServerConfigServer{
-				ID:                 i + 1,
-				Host:               "127.0.0.1",
-				PeerPort:           startPort + i*3 + 1,
-				LeaderElectionPort: startPort + i*3 + 2,
+				ID:                       i + 1,
+				Host:                     "127.0.0.1",
+				PeerPort:                 startPort + i*3 + 1,
+				PeerPortSecure:           startPortSecure + i*3 + 1,
+				LeaderElectionPort:       startPort + i*3 + 2,
+				LeaderElectionPortSecure: startPortSecure + i*3 + 2,
 			}
 
 			cfg.Servers = append(cfg.Servers, serverNConfig)
@@ -96,10 +103,11 @@ func StartTestCluster(t *testing.T, size int, stdout, stderr io.Writer) (*TestCl
 		}
 
 		cluster.Servers = append(cluster.Servers, TestServer{
-			Path:   srvPath,
-			Port:   cfg.ClientPort,
-			Srv:    srv,
-			Config: cfg.Servers[serverN],
+			Path:       srvPath,
+			Port:       cfg.ClientPort,
+			PortSecure: cfg.ClientPortSecure,
+			Srv:        srv,
+			Config:     cfg.Servers[serverN],
 		})
 		cluster.Config = cfg
 	}
@@ -111,6 +119,27 @@ func StartTestCluster(t *testing.T, size int, stdout, stderr io.Writer) (*TestCl
 	success = true
 
 	return cluster, nil
+}
+
+func (tc *TestCluster) ConnectTLS(idx int, config *tls.Config) (*Conn, <-chan Event, error) {
+	return ConnectTLS([]string{fmt.Sprintf("127.0.0.1:%d", tc.Servers[idx].Port)}, time.Second*15, config)
+}
+
+func (tc *TestCluster) ConnectAllTLS(config *tls.Config) (*Conn, <-chan Event, error) {
+	return tc.ConnectAllTimeoutTLS(time.Second*15, config)
+}
+
+func (tc *TestCluster) ConnectAllTimeoutTLS(sessionTimeout time.Duration, config *tls.Config) (*Conn, <-chan Event, error) {
+	return tc.ConnectWithOptionsTLS(sessionTimeout, config)
+}
+
+func (tc *TestCluster) ConnectWithOptionsTLS(sessionTimeout time.Duration, config *tls.Config, options ...connOption) (*Conn, <-chan Event, error) {
+	hosts := make([]string, len(tc.Servers))
+	for i, srv := range tc.Servers {
+		hosts[i] = fmt.Sprintf("127.0.0.1:%d", srv.Port)
+	}
+	zk, ch, err := ConnectTLS(hosts, sessionTimeout, config, options...)
+	return zk, ch, err
 }
 
 func (tc *TestCluster) Connect(idx int) (*Conn, <-chan Event, error) {
