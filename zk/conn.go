@@ -413,7 +413,8 @@ func (c *Conn) connect() error {
 		}
 
 		if c.enableTLS {
-			zkConn, zkConnErr := tls.Dial("tcp", c.Server(), c.configTLS)
+			dialer := net.Dialer{Timeout: c.connectTimeout}
+			zkConn, zkConnErr := tls.DialWithDialer(&dialer, "tcp", c.Server(), c.configTLS)
 			if zkConnErr == nil {
 				c.conn = zkConn
 				c.setState(StateConnected)
