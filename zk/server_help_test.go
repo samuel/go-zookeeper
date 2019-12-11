@@ -45,7 +45,7 @@ func StartTestCluster(t *testing.T, size int, stdout, stderr io.Writer) (*TestCl
 
 	success := false
 	startPort := int(rand.Int31n(6000) + 10000)
-	startPortSecure := int(rand.Int31n(6000) + 20000)
+	startPortSecure := startPort + 30000
 	cluster := &TestCluster{Path: tmpPath}
 
 	defer func() {
@@ -61,10 +61,10 @@ func StartTestCluster(t *testing.T, size int, stdout, stderr io.Writer) (*TestCl
 		}
 
 		port := startPort + serverN*3
-		protSecure := startPort + serverN*3
+		portSecure := startPortSecure + serverN*3
 		cfg := ServerConfig{
 			ClientPort:       port,
-			ClientPortSecure: protSecure,
+			ClientPortSecure: portSecure,
 			DataDir:          srvPath,
 		}
 
@@ -122,7 +122,7 @@ func StartTestCluster(t *testing.T, size int, stdout, stderr io.Writer) (*TestCl
 }
 
 func (tc *TestCluster) ConnectTLS(idx int, config *tls.Config) (*Conn, <-chan Event, error) {
-	return ConnectTLS([]string{fmt.Sprintf("127.0.0.1:%d", tc.Servers[idx].Port)}, time.Second*15, config)
+	return ConnectTLS([]string{fmt.Sprintf("127.0.0.1:%d", tc.Servers[idx].PortSecure)}, time.Second*15, config)
 }
 
 func (tc *TestCluster) ConnectAllTLS(config *tls.Config) (*Conn, <-chan Event, error) {
@@ -136,7 +136,7 @@ func (tc *TestCluster) ConnectAllTimeoutTLS(sessionTimeout time.Duration, config
 func (tc *TestCluster) ConnectWithOptionsTLS(sessionTimeout time.Duration, config *tls.Config, options ...connOption) (*Conn, <-chan Event, error) {
 	hosts := make([]string, len(tc.Servers))
 	for i, srv := range tc.Servers {
-		hosts[i] = fmt.Sprintf("127.0.0.1:%d", srv.Port)
+		hosts[i] = fmt.Sprintf("127.0.0.1:%d", srv.PortSecure)
 	}
 	zk, ch, err := ConnectTLS(hosts, sessionTimeout, config, options...)
 	return zk, ch, err
