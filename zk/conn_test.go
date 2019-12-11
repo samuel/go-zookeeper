@@ -1,6 +1,7 @@
 package zk
 
 import (
+	"crypto/tls"
 	"io/ioutil"
 	"testing"
 	"time"
@@ -54,4 +55,71 @@ func TestRecurringReAuthHang(t *testing.T) {
 	}
 
 	<-conn.debugReauthDone
+}
+
+func TestStateChangesTLS(t *testing.T) {
+	config, err := newTLSConfig("/tmp/certs/client.cer.pem", "/tmp/certs/client.key.pem")
+	if err != nil {
+		panic(err)
+	}
+
+	ts, err := StartTestCluster(t, 1, ioutil.Discard, logWriter{t: t, p: "[ZKERR] "})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ts.Stop()
+
+	callbackChan := make(chan Event)
+	f := func(event Event) {
+		callbackChan <- event
+	}
+
+	zk, eventChan, err := ts.ConnectWithOptionsTLS(15*time.Second, config, WithEventCallback(f))
+	if err != nil {
+		t.Fatalf("Connect returned error: %+v", err)
+	}
+
+	verifyEventOrder := func(c <-chan Event, expectedStates []State, source string) {
+		for _, state := range expectedStates {
+			for {
+				event, ok := <-c
+				if !ok {
+					t.Fatalf("unexpected channel close for %s", source)
+				}
+
+				if event.Type != EventSession {
+					continue
+				}
+
+				if event.State != state {
+					t.Fatalf("mismatched state order from %s, expected %v, received %v", source, state, event.State)
+				}
+				break
+			}
+		}
+	}
+
+	states := []State{StateConnecting, StateConnected, StateHasSession}
+	verifyEventOrder(callbackChan, states, "callback")
+	verifyEventOrder(eventChan, states, "event channel")
+
+	zk.Close()
+	verifyEventOrder(callbackChan, []State{StateDisconnected}, "callback")
+	verifyEventOrder(eventChan, []State{StateDisconnected}, "event channel")
+}
+
+func newTLSConfig(clientCertFile, clientKeyFile string) (*tls.Config, error) {
+	tlsConfig := tls.Config{
+		InsecureSkipVerify: true,
+	}
+
+	// Load client cert
+	cert, err := tls.LoadX509KeyPair(clientCertFile, clientKeyFile)
+	if err != nil {
+		return nil, err
+	}
+	tlsConfig.Certificates = []tls.Certificate{cert}
+
+	tlsConfig.BuildNameToCertificate()
+	return &tlsConfig, nil
 }
