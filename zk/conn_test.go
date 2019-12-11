@@ -58,12 +58,14 @@ func TestRecurringReAuthHang(t *testing.T) {
 }
 
 func TestStateChangesTLS(t *testing.T) {
+	t.Skip("Can't determent Zookeeper version")
+
 	config, err := newTLSConfig("/tmp/certs/client.cer.pem", "/tmp/certs/client.key.pem")
 	if err != nil {
 		panic(err)
 	}
 
-	ts, err := StartTestCluster(t, 1, ioutil.Discard, logWriter{t: t, p: "[ZKERR] "})
+	ts, err := StartTestCluster(t, 1, logWriter{t: t, p: "[ZK] "}, logWriter{t: t, p: "[ZKERR] "})
 	if err != nil {
 		t.Fatal(err)
 	}

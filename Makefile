@@ -1,8 +1,8 @@
 # make file to hold the logic of build and test setup
-ZK_VERSION ?= 3.5.6
+ZK_VERSION ?= 3.3.3
 
 ZK = zookeeper-$(ZK_VERSION)
-ZK_URL = "https://archive.apache.org/dist/zookeeper/$(ZK)/apache-$(ZK)-bin.tar.gz"
+ZK_URL = "https://archive.apache.org/dist/zookeeper/$(ZK)/$(ZK).tar.gz"
 
 tls_passwd = password
 tls_dir = "/tmp/certs"
@@ -13,7 +13,7 @@ PACKAGES := $(shell go list ./... | grep -v examples)
 
 $(ZK):
 	wget $(ZK_URL)
-	tar -zxf apache-$(ZK)-bin.tar.gz
+	tar -zxf $(ZK).tar.gz
 	# we link to a standard directory path so then the tests dont need to find based on version
 	# in the test code. this allows backward compatable testing.
 	ln -s $(ZK) zookeeper
