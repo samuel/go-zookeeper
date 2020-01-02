@@ -35,7 +35,7 @@ env:
   global:
     secure: Coha3DDcXmsekrHCZlKvRAc+pMBaQU1QS/3++3YCCUXVDBWgVsC1ZIc9df4RLdZ/ncGd86eoRq/S+zyn1XbnqK5+ePqwJoUnJ59BE8ZyHLWI9ajVn3fND1MTduu/ksGsS79+IYbdVI5wgjSgjD3Ktp6Y5uPl+BPosjYBGdNcHS4=
   matrix:
-    - zk_version=3.5.4-beta
-    - zk_version=3.4.12
-    - zk_version=3.4.12
+    - zk_version=3.5.4-beta zk_prefix="" zk_suffix=""
+    - zk_version=3.4.12 zk_prefix="" zk_suffix=""
+    - zk_version=3.4.12 zk_prefix="" zk_suffix=""
     - zk_version=3.5.6-bin zk_prefix=apache- zk_suffix=-bin
