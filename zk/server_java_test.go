@@ -48,7 +48,7 @@ func NewIntegrationTestServer(t *testing.T, configPath string, stdout, stderr io
 		}
 	}
 	// password is 'test'
-	superString := `SERVER_JVMFLAGS=-Dzookeeper.DigestAuthenticationProvider.superDigest=:D/InIHSb7yEEbrWz8b9l71RjZJU=`
+	superString := `SERVER_JVMFLAGS=-Dzookeeper.DigestAuthenticationProvider.superDigest=super:D/InIHSb7yEEbrWz8b9l71RjZJU=`
 
 	if os.Getenv("tls") != "true" {
 		superString = `SERVER_JVMFLAGS=
