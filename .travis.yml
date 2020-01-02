@@ -17,7 +17,7 @@ branches:
     - tls-local
 
 before_install:
-  - make setup ZK_VERSION=${zk_version} ZK_PREFIX={$zk_prefix} ZK_SUFFIX={$zk_suffix}
+  - make setup ZK_VERSION=${zk_version} ZK_PREFIX=$zk_prefix ZK_SUFFIX=$zk_suffix
 
 before_script:
   - make lint
