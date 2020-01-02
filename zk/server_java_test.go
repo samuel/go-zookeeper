@@ -48,11 +48,10 @@ func NewIntegrationTestServer(t *testing.T, configPath string, stdout, stderr io
 		}
 	}
 	// password is 'test'
-	superString := `SERVER_JVMFLAGS=
--Dzookeeper.DigestAuthenticationProvider.superDigest=:D/InIHSb7yEEbrWz8b9l71RjZJU=`
+	superString := `SERVER_JVMFLAGS=-Dzookeeper.DigestAuthenticationProvider.superDigest=:D/InIHSb7yEEbrWz8b9l71RjZJU=`
 
 	if os.Getenv("tls") != "true" {
-		superString = `SERVER_JVMFLAGS=-Djdk.tls.rejectClientInitiatedRenegotiation=true
+		superString = `SERVER_JVMFLAGS=
 		-Dzookeeper.serverCnxnFactory=org.apache.zookeeper.server.NettyServerCnxnFactory
 		-Dzookeeper.ssl.keyStore.location=/tmp/certs/zookeeper.server.keystore.jks
 		-Dzookeeper.ssl.keyStore.password=password
