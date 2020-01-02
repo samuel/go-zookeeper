@@ -3,6 +3,7 @@ package zk
 import (
 	"crypto/tls"
 	"io/ioutil"
+	"os"
 	"testing"
 	"time"
 )
@@ -58,6 +59,9 @@ func TestRecurringReAuthHang(t *testing.T) {
 }
 
 func TestStateChangesTLS(t *testing.T) {
+	if os.Getenv("ZK_VERSION") != "3.5.6" {
+		t.Skip("No TLS support")
+	}
 
 	config, err := newTLSConfig("/tmp/certs/client.cer.pem", "/tmp/certs/client.key.pem")
 	if err != nil {
