@@ -1,8 +1,9 @@
 # make file to hold the logic of build and test setup
-ZK_VERSION ?= 3.3.3
+ZK_VERSION ?= 3.5.6
 
 ZK = zookeeper-$(ZK_VERSION)
-ZK_URL = "https://archive.apache.org/dist/zookeeper/$(ZK)/$(ZK).tar.gz"
+ZK_PREFIX ?= apache-
+ZK_URL = "https://archive.apache.org/dist/zookeeper/$(ZK)/$(ZK_PREFIX)$(ZK).tar.gz"
 
 tls_passwd = password
 tls_dir = "/tmp/certs"
@@ -11,12 +12,12 @@ PACKAGES := $(shell go list ./... | grep -v examples)
 
 .DEFAULT_GOAL := test
 
-$(ZK):
+$(ZK_PREFIX)$(ZK):
 	wget $(ZK_URL)
-	tar -zxf $(ZK).tar.gz
+	tar -zxf $(ZK_PREFIX)$(ZK).tar.gz
 	# we link to a standard directory path so then the tests dont need to find based on version
 	# in the test code. this allows backward compatable testing.
-	ln -s $(ZK) zookeeper
+	ln -s $(ZK_PREFIX)$(ZK) zookeeper
 
 .PHONY: install-covertools
 install-covertools:
@@ -24,7 +25,7 @@ install-covertools:
 	go get golang.org/x/tools/cmd/cover
 
 .PHONY: setup
-setup: certs $(ZK) install-covertools
+setup: certs $(ZK_PREFIX)$(ZK) install-covertools
 
 
 .PHONY: lint

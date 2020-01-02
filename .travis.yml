@@ -17,7 +17,7 @@ branches:
     - tls-local
 
 before_install:
-  - make setup ZK_VERSION=${zk_version}
+  - make setup ZK_VERSION=${zk_version} ZK_PREFIX={$zk_prfix}
 
 before_script:
   - make lint
@@ -37,3 +37,5 @@ env:
   matrix:
     - zk_version=3.5.4-beta
     - zk_version=3.4.12
+    - zk_version=3.4.12
+    - zk_version=3.5.6 zk_prfix=apache-

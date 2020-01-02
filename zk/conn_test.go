@@ -58,7 +58,6 @@ func TestRecurringReAuthHang(t *testing.T) {
 }
 
 func TestStateChangesTLS(t *testing.T) {
-	t.Skip("Can't determent Zookeeper version")
 
 	config, err := newTLSConfig("/tmp/certs/client.cer.pem", "/tmp/certs/client.key.pem")
 	if err != nil {
