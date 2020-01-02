@@ -1,5 +1,5 @@
 # make file to hold the logic of build and test setup
-ZK_VERSION ?= 3.4.12
+ZK_VERSION ?= 3.5.4-beta
 
 ZK = zookeeper-$(ZK_VERSION)
 ZK_URL = "https://archive.apache.org/dist/zookeeper/$(ZK)/$(ZK_PREFIX)$(ZK)$(ZK_SUFFIX).tar.gz"
