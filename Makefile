@@ -1,9 +1,10 @@
 # make file to hold the logic of build and test setup
-ZK_VERSION ?= 3.5.6-bin
+ZK_VERSION ?= 3.5.6
 
 ZK = zookeeper-$(ZK_VERSION)
 ZK_PREFIX ?= apache-
-ZK_URL = "https://archive.apache.org/dist/zookeeper/$(ZK)/$(ZK_PREFIX)$(ZK).tar.gz"
+ZK_SUFFIX ?= -bin
+ZK_URL = "https://archive.apache.org/dist/zookeeper/$(ZK)/$(ZK_PREFIX)$(ZK)$(ZK_SUFFIX).tar.gz"
 
 tls_passwd = password
 tls_dir = "/tmp/certs"
@@ -14,10 +15,10 @@ PACKAGES := $(shell go list ./... | grep -v examples)
 
 $(ZK):
 	wget $(ZK_URL)
-	tar -zxf $(ZK_PREFIX)$(ZK).tar.gz
+	tar -zxf $(ZK_PREFIX)$(ZK)$(ZK_SUFFIX).tar.gz
 	# we link to a standard directory path so then the tests dont need to find based on version
 	# in the test code. this allows backward compatable testing.
-	ln -s $(ZK_PREFIX)$(ZK) zookeeper
+	ln -s $(ZK_PREFIX)$(ZK)$(ZK_SUFFIX) zookeeper
 
 .PHONY: install-covertools
 install-covertools:
