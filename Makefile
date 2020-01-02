@@ -1,9 +1,7 @@
 # make file to hold the logic of build and test setup
-ZK_VERSION ?= 3.5.6
+ZK_VERSION ?= 3.4.12
 
 ZK = zookeeper-$(ZK_VERSION)
-ZK_PREFIX ?= apache-
-ZK_SUFFIX ?= -bin
 ZK_URL = "https://archive.apache.org/dist/zookeeper/$(ZK)/$(ZK_PREFIX)$(ZK)$(ZK_SUFFIX).tar.gz"
 
 tls_passwd = password
