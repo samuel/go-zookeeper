@@ -59,7 +59,7 @@ func TestRecurringReAuthHang(t *testing.T) {
 }
 
 func TestStateChangesTLS(t *testing.T) {
-	if os.Getenv("ZK_VERSION") != "3.5.6" {
+	if os.Getenv("tls") != "true" {
 		t.Skip("No TLS support")
 	}
 

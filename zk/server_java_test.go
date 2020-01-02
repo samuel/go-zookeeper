@@ -49,13 +49,16 @@ func NewIntegrationTestServer(t *testing.T, configPath string, stdout, stderr io
 	}
 	// password is 'test'
 	superString := `SERVER_JVMFLAGS=
--Dzookeeper.DigestAuthenticationProvider.superDigest=:D/InIHSb7yEEbrWz8b9l71RjZJU=
--Djdk.tls.rejectClientInitiatedRenegotiation=true
--Dzookeeper.serverCnxnFactory=org.apache.zookeeper.server.NettyServerCnxnFactory
--Dzookeeper.ssl.keyStore.location=/tmp/certs/zookeeper.server.keystore.jks
--Dzookeeper.ssl.keyStore.password=password
--Dzookeeper.ssl.trustStore.location=/tmp/certs/zookeeper.server.truststore.jks
--Dzookeeper.ssl.trustStore.password=password`
+-Dzookeeper.DigestAuthenticationProvider.superDigest=:D/InIHSb7yEEbrWz8b9l71RjZJU=`
+
+	if os.Getenv("tls") != "true" {
+		superString = `SERVER_JVMFLAGS=-Djdk.tls.rejectClientInitiatedRenegotiation=true
+		-Dzookeeper.serverCnxnFactory=org.apache.zookeeper.server.NettyServerCnxnFactory
+		-Dzookeeper.ssl.keyStore.location=/tmp/certs/zookeeper.server.keystore.jks
+		-Dzookeeper.ssl.keyStore.password=password
+		-Dzookeeper.ssl.trustStore.location=/tmp/certs/zookeeper.server.truststore.jks
+		-Dzookeeper.ssl.trustStore.password=password`
+	}
 
 	return &server{
 		cmdString: filepath.Join(zkPath, "zkServer.sh"),
@@ -127,7 +130,11 @@ func (sc ServerConfig) Marshall(w io.Writer) error {
 		sc.ClientPort = DefaultPort
 	}
 	fmt.Fprintf(w, "clientPort=%d\n", sc.ClientPort)
-	fmt.Fprintf(w, "secureClientPort=%d\n", sc.ClientPortSecure)
+
+	if os.Getenv("tls") == "true" {
+		fmt.Fprintf(w, "secureClientPort=%d\n", sc.ClientPortSecure)
+	}
+
 	if sc.AutoPurgePurgeInterval > 0 {
 		if sc.AutoPurgeSnapRetainCount <= 0 {
 			sc.AutoPurgeSnapRetainCount = DefaultServerAutoPurgeSnapRetainCount

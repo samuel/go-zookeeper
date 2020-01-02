@@ -39,4 +39,4 @@ env:
     - zk_version=3.5.4-beta zk_prefix="" zk_suffix=""
     - zk_version=3.4.12 zk_prefix="" zk_suffix=""
     - zk_version=3.4.12 zk_prefix="" zk_suffix=""
-    - zk_version=3.5.6 zk_prefix="apache-" zk_suffix="-bin"
+    - zk_version=3.5.6 zk_prefix="apache-" zk_suffix="-bin" tls="true"
