@@ -18,7 +18,6 @@ branches:
 
 before_install:
   - make setup ZK_VERSION=${zk_version}
-  - make -v
 
 before_script:
   - make lint
