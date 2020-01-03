@@ -105,46 +105,46 @@ type ServerConfig struct {
 	ClientPortSecure         int
 }
 
-func (sc ServerConfig) Marshall(w io.Writer) error {
+func (sc ServerConfig) Marshall(fi *os.File) error {
 	// the admin server is not wanted in test cases as it slows the startup process and is
 	// of little unit test value.
-	fmt.Fprintln(w, "admin.enableServer=false")
+	fmt.Fprintln(fi, "admin.enableServer=false")
 	if sc.DataDir == "" {
 		return ErrMissingServerConfigField("dataDir")
 	}
-	fmt.Fprintf(w, "dataDir=%s\n", sc.DataDir)
+	fmt.Fprintf(fi, "dataDir=%s\n", sc.DataDir)
 	if sc.TickTime <= 0 {
 		sc.TickTime = DefaultServerTickTime
 	}
-	fmt.Fprintf(w, "tickTime=%d\n", sc.TickTime)
+	fmt.Fprintf(fi, "tickTime=%d\n", sc.TickTime)
 	if sc.InitLimit <= 0 {
 		sc.InitLimit = DefaultServerInitLimit
 	}
-	fmt.Fprintf(w, "initLimit=%d\n", sc.InitLimit)
+	fmt.Fprintf(fi, "initLimit=%d\n", sc.InitLimit)
 	if sc.SyncLimit <= 0 {
 		sc.SyncLimit = DefaultServerSyncLimit
 	}
-	fmt.Fprintf(w, "syncLimit=%d\n", sc.SyncLimit)
+	fmt.Fprintf(fi, "syncLimit=%d\n", sc.SyncLimit)
 	if sc.ClientPort <= 0 {
 		sc.ClientPort = DefaultPort
 	}
-	fmt.Fprintf(w, "clientPort=%d\n", sc.ClientPort)
+	fmt.Fprintf(fi, "clientPort=%d\n", sc.ClientPort)
 
 	if os.Getenv("tls") == "true" {
-		fmt.Fprintf(w, "secureClientPort=%d\n", sc.ClientPortSecure)
+		fmt.Fprintf(fi, "secureClientPort=%d\n", sc.ClientPortSecure)
 	}
 
 	if sc.AutoPurgePurgeInterval > 0 {
 		if sc.AutoPurgeSnapRetainCount <= 0 {
 			sc.AutoPurgeSnapRetainCount = DefaultServerAutoPurgeSnapRetainCount
 		}
-		fmt.Fprintf(w, "autopurge.snapRetainCount=%d\n", sc.AutoPurgeSnapRetainCount)
-		fmt.Fprintf(w, "autopurge.purgeInterval=%d\n", sc.AutoPurgePurgeInterval)
+		fmt.Fprintf(fi, "autopurge.snapRetainCount=%d\n", sc.AutoPurgeSnapRetainCount)
+		fmt.Fprintf(fi, "autopurge.purgeInterval=%d\n", sc.AutoPurgePurgeInterval)
 	}
 	// enable reconfig.
 	// TODO: allow setting this
-	fmt.Fprintln(w, "reconfigEnabled=true")
-	fmt.Fprintln(w, "4lw.commands.whitelist=*")
+	fmt.Fprintln(fi, "reconfigEnabled=true")
+	fmt.Fprintln(fi, "4lw.commands.whitelist=*")
 
 	if len(sc.Servers) < 2 {
 		// if we dont have more than 2 servers we just dont specify server list to start in standalone mode
@@ -152,7 +152,7 @@ func (sc ServerConfig) Marshall(w io.Writer) error {
 		return nil
 	}
 	// if we then have more than one server force it to be distributed
-	fmt.Fprintln(w, "standaloneEnabled=false")
+	fmt.Fprintln(fi, "standaloneEnabled=false")
 
 	for _, srv := range sc.Servers {
 		if srv.PeerPort <= 0 {
@@ -161,7 +161,7 @@ func (sc ServerConfig) Marshall(w io.Writer) error {
 		if srv.LeaderElectionPort <= 0 {
 			srv.LeaderElectionPort = DefaultLeaderElectionPort
 		}
-		fmt.Fprintf(w, "server.%d=%s:%d:%d\n", srv.ID, srv.Host, srv.PeerPort, srv.LeaderElectionPort)
+		fmt.Fprintf(fi, "server.%d=%s:%d:%d\n", srv.ID, srv.Host, srv.PeerPort, srv.LeaderElectionPort)
 	}
 	return nil
 }
