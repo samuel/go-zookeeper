@@ -7,6 +7,9 @@ ZK_URL = "https://archive.apache.org/dist/zookeeper/$(ZK)/$(ZK_PREFIX)$(ZK)$(ZK_
 tls_passwd = password
 tls_dir = "/tmp/certs"
 
+tls_passwd = password
+tls_dir = "/tmp/certs"
+
 PACKAGES := $(shell go list ./... | grep -v examples)
 
 .DEFAULT_GOAL := test
