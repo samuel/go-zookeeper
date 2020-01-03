@@ -57,8 +57,6 @@ func NewIntegrationTestServer(t *testing.T, configPath string, stdout, stderr io
 		-Dzookeeper.ssl.keyStore.password=password
 		-Dzookeeper.ssl.trustStore.location=/tmp/certs/zookeeper.server.truststore.jks
 		-Dzookeeper.ssl.trustStore.password=password`
-	} else {
-		fmt.Println("No TÖS")
 	}
 
 	return &server{
@@ -133,10 +131,7 @@ func (sc ServerConfig) Marshall(w io.Writer) error {
 	fmt.Fprintf(w, "clientPort=%d\n", sc.ClientPort)
 
 	if os.Getenv("tls") == "true" {
-		fmt.Println("tls")
 		fmt.Fprintf(w, "secureClientPort=%d\n", sc.ClientPortSecure)
-	} else {
-		fmt.Println("No tls")
 	}
 
 	if sc.AutoPurgePurgeInterval > 0 {
