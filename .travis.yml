@@ -36,5 +36,4 @@ env:
   matrix:
     - zk_version=3.5.4-beta
     - zk_version=3.4.12
-    - zk_version=3.4.12
     - zk_version=3.5.4-beta tls="true"
