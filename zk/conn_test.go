@@ -3,6 +3,7 @@ package zk
 import (
 	"crypto/tls"
 	"io/ioutil"
+	"os"
 	"testing"
 	"time"
 )
