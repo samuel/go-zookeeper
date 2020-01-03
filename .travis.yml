@@ -14,9 +14,11 @@ sudo: false
 branches:
   only:
     - master
+    - tls-local
 
 before_install:
-  - make setup ZK_VERSION=${zk_version}
+  - make setup ZK_VERSION=${zk_version} ZK_PREFIX=${zk_prefix} ZK_SUFFIX=${zk_suffix}
+  - make -v
 
 before_script:
   - make lint
@@ -34,5 +36,7 @@ env:
   global:
     secure: Coha3DDcXmsekrHCZlKvRAc+pMBaQU1QS/3++3YCCUXVDBWgVsC1ZIc9df4RLdZ/ncGd86eoRq/S+zyn1XbnqK5+ePqwJoUnJ59BE8ZyHLWI9ajVn3fND1MTduu/ksGsS79+IYbdVI5wgjSgjD3Ktp6Y5uPl+BPosjYBGdNcHS4=
   matrix:
-    - zk_version=3.5.4-beta
-    - zk_version=3.4.12
+    - zk_version=3.5.4-beta zk_prefix="" zk_suffix=""
+    - zk_version=3.4.12 zk_prefix="" zk_suffix=""
+    - zk_version=3.4.12 zk_prefix="" zk_suffix=""
+    - zk_version=3.5.4-beta zk_prefix="" zk_suffix="" tls="true"
