@@ -51,8 +51,7 @@ func NewIntegrationTestServer(t *testing.T, configPath string, stdout, stderr io
 	superString := `SERVER_JVMFLAGS=-Dzookeeper.DigestAuthenticationProvider.superDigest=super:D/InIHSb7yEEbrWz8b9l71RjZJU=`
 
 	if os.Getenv("tls") == "true" {
-		superString = `SERVER_JVMFLAGS=
-		-Dzookeeper.serverCnxnFactory=org.apache.zookeeper.server.NettyServerCnxnFactory
+		superString += `-Dzookeeper.serverCnxnFactory=org.apache.zookeeper.server.NettyServerCnxnFactory
 		-Dzookeeper.ssl.keyStore.location=/tmp/certs/zookeeper.server.keystore.jks
 		-Dzookeeper.ssl.keyStore.password=password
 		-Dzookeeper.ssl.trustStore.location=/tmp/certs/zookeeper.server.truststore.jks
