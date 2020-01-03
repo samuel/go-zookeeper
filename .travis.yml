@@ -15,7 +15,6 @@ branches:
   only:
     - master
     - tls-local
-    - test
 
 before_install:
   - make setup ZK_VERSION=${zk_version}
