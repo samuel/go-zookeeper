@@ -14,7 +14,6 @@ sudo: false
 branches:
   only:
     - master
-    - tls-local
 
 before_install:
   - make setup ZK_VERSION=${zk_version}
