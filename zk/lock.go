@@ -63,7 +63,8 @@ func (l *Lock) Lock() error {
 	for i := 0; i < 3; i++ {
 		path, err = l.c.CreateProtectedEphemeralSequential(prefix, []byte{}, l.acl)
 		mapEphermeralSequenceLockPath[l.path] = path
-		if err == ErrNoNode {
+		switch err {
+		case ErrNoNode:
 			// Create parent node.
 			parts := strings.Split(l.path, "/")
 			pth := ""
@@ -82,9 +83,9 @@ func (l *Lock) Lock() error {
 					return err
 				}
 			}
-		} else if err == nil {
+		case nil:
 			break
-		} else {
+		default:
 			return err
 		}
 	}
