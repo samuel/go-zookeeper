@@ -24,6 +24,9 @@ type Lock struct {
 	seq      int
 }
 
+// Initializing a map using the built-in make() function
+// This map stores the lock_path of last successfully requested sequential ephemeral znode queued
+// In case of any conflict, the sequence number is used to check whether lock has been acquired
 var mapEphermeralSequenceLockPath = make(map[string]string)
 
 // NewLock creates a new lock instance using the provided connection, path, and acl.
@@ -46,22 +49,24 @@ func parseSeq(path string) (int, error) {
 // is acquired or an error occurs. If this instance already has the lock
 // then ErrDeadlock is returned.
 func (l *Lock) Lock() error {
-	if(mapEphermeralSequenceLockPath[l.path]!="") {
-		if(lockExists(l.c,l.path,mapEphermeralSequenceLockPath[l.path])) {
-			return nil
-		}
-	}
-
 	if l.lockPath != "" {
 		return ErrDeadlock
+	}
+
+	if seqZnodePath, ok := mapEphermeralSequenceLockPath[l.path]; ok && seqZnodePath != "" {
+		// Check whether lock has been acquired previously and it still exists
+		if(lockExists(l.c,l.path,seqZnodePath)) {
+			return nil
+		}
 	}
 
 	prefix := fmt.Sprintf("%s/lock-", l.path)
 
 	path := ""
 	var err error
-	for i := 0; i < 3; i++ {
+	tryLock: for i := 0; i < 3; i++ {
 		path, err = l.c.CreateProtectedEphemeralSequential(prefix, []byte{}, l.acl)
+		// Store the path of newly created sequential ephemeral znode against the parent znode path
 		mapEphermeralSequenceLockPath[l.path] = path
 		switch err {
 		case ErrNoNode:
@@ -84,7 +89,7 @@ func (l *Lock) Lock() error {
 				}
 			}
 		case nil:
-			break
+			break tryLock
 		default:
 			return err
 		}
@@ -157,6 +162,8 @@ func (l *Lock) Unlock() error {
 	}
 	l.lockPath = ""
 	l.seq = 0
+	// Remove the entry of path of newly created sequential ephemeral znode
+	// this was stored against the parent znode path
 	delete(mapEphermeralSequenceLockPath,l.path)
 	return nil
 }
@@ -171,32 +178,30 @@ func lockExists(c *Conn, rootPath string, znodePath string) bool {
 	}
 
 	//scans the existing znodes if there are any
-	for {
-		children, _, err := c.Children(rootPath)
+	children, _, err := c.Children(rootPath)
+	if err != nil {
+		return false
+	}
+
+	lowestSeq := seq
+	prevSeq := -1
+	for _, p := range children {
+		s, err := parseSeq(p)
 		if err != nil {
 			return false
 		}
-
-		lowestSeq := seq
-		prevSeq := -1
-		for _, p := range children {
-			s, err := parseSeq(p)
-			if err != nil {
-				return false
-			}
-			if s < lowestSeq {
-				lowestSeq = s
-			}
-			if s < seq && s > prevSeq {
-				prevSeq = s
-			}
+		if s < lowestSeq {
+			lowestSeq = s
 		}
-
-		if seq == lowestSeq {
-			// Acquired the lock
-			return true
-		} else {
-			return false
+		if s < seq && s > prevSeq {
+			prevSeq = s
 		}
+	}
+
+	if seq == lowestSeq {
+		// Acquired the lock
+		return true
+	} else {
+		return false
 	}
 }
