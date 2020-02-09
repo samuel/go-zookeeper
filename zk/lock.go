@@ -201,7 +201,7 @@ func lockExists(c *Conn, rootPath string, znodePath string) bool {
 	if seq == lowestSeq {
 		// Acquired the lock
 		return true
-	} else {
-		return false
 	}
+
+	return false
 }
