@@ -12,7 +12,6 @@ var (
 	ErrDeadlock = errors.New("zk: trying to acquire a lock twice")
 	// ErrNotLocked is returned by Unlock when trying to release a lock that has not first be acquired.
 	ErrNotLocked = errors.New("zk: not locked")
-
 )
 
 // Lock is a mutual exclusion lock.
@@ -27,7 +26,7 @@ type Lock struct {
 // Initializing a map using the built-in make() function
 // This map stores the lock_path of last successfully requested sequential ephemeral znode queued
 // In case of any conflict, the sequence number is used to check whether lock has been acquired
-var mapEphermeralSequenceLockPath = make(map[string]string)
+var lockPathsByPath = make(map[string]string)
 
 // NewLock creates a new lock instance using the provided connection, path, and acl.
 // The path must be a node that is only used by this lock. A lock instances starts
@@ -53,9 +52,9 @@ func (l *Lock) Lock() error {
 		return ErrDeadlock
 	}
 
-	if seqZnodePath, ok := mapEphermeralSequenceLockPath[l.path]; ok && seqZnodePath != "" {
+	if seqZnodePath, ok := lockPathsByPath[l.path]; ok && seqZnodePath != "" {
 		// Check whether lock has been acquired previously and it still exists
-		if(lockExists(l.c,l.path,seqZnodePath)) {
+		if lockExists(l.c, l.path, seqZnodePath) {
 			return nil
 		}
 	}
@@ -64,10 +63,11 @@ func (l *Lock) Lock() error {
 
 	path := ""
 	var err error
-	tryLock: for i := 0; i < 3; i++ {
+tryLock:
+	for i := 0; i < 3; i++ {
 		path, err = l.c.CreateProtectedEphemeralSequential(prefix, []byte{}, l.acl)
 		// Store the path of newly created sequential ephemeral znode against the parent znode path
-		mapEphermeralSequenceLockPath[l.path] = path
+		lockPathsByPath[l.path] = path
 		switch err {
 		case ErrNoNode:
 			// Create parent node.
@@ -164,7 +164,7 @@ func (l *Lock) Unlock() error {
 	l.seq = 0
 	// Remove the entry of path of newly created sequential ephemeral znode
 	// this was stored against the parent znode path
-	delete(mapEphermeralSequenceLockPath,l.path)
+	delete(lockPathsByPath, l.path)
 	return nil
 }
 
