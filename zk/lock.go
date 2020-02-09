@@ -168,7 +168,7 @@ func (l *Lock) Unlock() error {
 	return nil
 }
 
-//Checks whether lock got created and response was lost because of network partition failure.
+//Check whether lock got created and response was lost because of network partition failure.
 //It queries zookeeper and scans existing sequential ephemeral znodes under the parent path
 //It finds out that previously requested sequence number corresponds to child having lowest sequence number
 func lockExists(c *Conn, rootPath string, znodePath string) bool {
@@ -177,7 +177,7 @@ func lockExists(c *Conn, rootPath string, znodePath string) bool {
 		return false
 	}
 
-	//scans the existing znodes if there are any
+	//Scan the existing znodes if there are any
 	children, _, err := c.Children(rootPath)
 	if err != nil {
 		return false
