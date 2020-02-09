@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"sync"
 )
 
 var (
@@ -26,7 +27,10 @@ type Lock struct {
 // Initializing a map using the built-in make() function
 // This map stores the lock_path of last successfully requested sequential ephemeral znode queued
 // In case of any conflict, the sequence number is used to check whether lock has been acquired
-var lockPathsByPath = make(map[string]string)
+var (
+	lockPathsByPath     = make(map[string]string)
+	lockPathsByPathLock sync.Mutex
+)
 
 // NewLock creates a new lock instance using the provided connection, path, and acl.
 // The path must be a node that is only used by this lock. A lock instances starts
@@ -66,8 +70,12 @@ func (l *Lock) Lock() error {
 tryLock:
 	for i := 0; i < 3; i++ {
 		path, err = l.c.CreateProtectedEphemeralSequential(prefix, []byte{}, l.acl)
+
 		// Store the path of newly created sequential ephemeral znode against the parent znode path
+		lockPathsByPathLock.Lock()
 		lockPathsByPath[l.path] = path
+		lockPathsByPathLock.Unlock()
+
 		switch err {
 		case ErrNoNode:
 			// Create parent node.
@@ -164,7 +172,9 @@ func (l *Lock) Unlock() error {
 	l.seq = 0
 	// Remove the entry of path of newly created sequential ephemeral znode
 	// this was stored against the parent znode path
+	lockPathsByPathLock.Lock()
 	delete(lockPathsByPath, l.path)
+	lockPathsByPathLock.Unlock()
 	return nil
 }
 
