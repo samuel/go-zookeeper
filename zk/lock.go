@@ -22,6 +22,7 @@ type Lock struct {
 	acl      []ACL
 	lockPath string
 	seq      int
+	attemptedLockPath string
 }
 
 // Initializing a map using the built-in make() function
@@ -56,9 +57,9 @@ func (l *Lock) Lock() error {
 		return ErrDeadlock
 	}
 
-	if seqZnodePath, ok := lockPathsByPath[l.path]; ok && seqZnodePath != "" {
+	if l.attemptedLockPath!="" {
 		// Check whether lock has been acquired previously and it still exists
-		if lockExists(l.c, l.path, seqZnodePath) {
+		if lockExists(l.c, l.path, l.attemptedLockPath) {
 			return nil
 		}
 	}
@@ -71,10 +72,10 @@ tryLock:
 	for i := 0; i < 3; i++ {
 		path, err = l.c.CreateProtectedEphemeralSequential(prefix, []byte{}, l.acl)
 
-		// Store the path of newly created sequential ephemeral znode against the parent znode path
-		lockPathsByPathLock.Lock()
-		lockPathsByPath[l.path] = path
-		lockPathsByPathLock.Unlock()
+		if(path!="") {
+			// Store the path of newly created sequential ephemeral znode
+			l.attemptedLockPath = path
+		}
 
 		switch err {
 		case ErrNoNode:
@@ -168,13 +169,11 @@ func (l *Lock) Unlock() error {
 	if err := l.c.Delete(l.lockPath, -1); err != nil {
 		return err
 	}
+	// Perform clean up
 	l.lockPath = ""
 	l.seq = 0
-	// Remove the entry of path of newly created sequential ephemeral znode
-	// this was stored against the parent znode path
-	lockPathsByPathLock.Lock()
-	delete(lockPathsByPath, l.path)
-	lockPathsByPathLock.Unlock()
+ 	l.attemptedLockPath = ""
+
 	return nil
 }
 
