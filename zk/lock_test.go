@@ -164,14 +164,14 @@ func TestLockPathExists(t *testing.T) {
 	}{
 		{"lock_path_populated_success", args{
 			zk,
-			"test",
+			"/test",
 			l.attemptedLockPath,
 		},
 			true,
 		},
 		{"lock_path_populated_failure", args{
 			zk,
-			"test_no_lock",
+			"/test_no_lock",
 			l.attemptedLockPath,
 		},
 			false,
