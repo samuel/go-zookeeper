@@ -51,6 +51,7 @@ func (l *Lock) Lock() error {
 	if l.attemptedLockPath != "" {
 		// Check whether lock has been acquired previously and it still exists
 		if lockExists(l.c, l.path, l.attemptedLockPath) {
+			l.lockPath = l.attemptedLockPath
 			return nil
 		}
 	}
