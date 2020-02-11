@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
-	"sync"
 )
 
 var (
@@ -17,21 +16,13 @@ var (
 
 // Lock is a mutual exclusion lock.
 type Lock struct {
-	c        *Conn
-	path     string
-	acl      []ACL
-	lockPath string
-	seq      int
+	c                 *Conn
+	path              string
+	acl               []ACL
+	lockPath          string
+	seq               int
 	attemptedLockPath string
 }
-
-// Initializing a map using the built-in make() function
-// This map stores the lock_path of last successfully requested sequential ephemeral znode queued
-// In case of any conflict, the sequence number is used to check whether lock has been acquired
-var (
-	lockPathsByPath     = make(map[string]string)
-	lockPathsByPathLock sync.Mutex
-)
 
 // NewLock creates a new lock instance using the provided connection, path, and acl.
 // The path must be a node that is only used by this lock. A lock instances starts
@@ -57,7 +48,7 @@ func (l *Lock) Lock() error {
 		return ErrDeadlock
 	}
 
-	if l.attemptedLockPath!="" {
+	if l.attemptedLockPath != "" {
 		// Check whether lock has been acquired previously and it still exists
 		if lockExists(l.c, l.path, l.attemptedLockPath) {
 			return nil
@@ -72,7 +63,7 @@ tryLock:
 	for i := 0; i < 3; i++ {
 		path, err = l.c.CreateProtectedEphemeralSequential(prefix, []byte{}, l.acl)
 
-		if(path!="") {
+		if path != "" {
 			// Store the path of newly created sequential ephemeral znode
 			l.attemptedLockPath = path
 		}
@@ -172,7 +163,7 @@ func (l *Lock) Unlock() error {
 	// Perform clean up
 	l.lockPath = ""
 	l.seq = 0
- 	l.attemptedLockPath = ""
+	l.attemptedLockPath = ""
 
 	return nil
 }
