@@ -149,6 +149,7 @@ type connectRequest struct {
 	TimeOut         int32
 	SessionID       int64
 	Passwd          []byte
+	ReadOnly        bool // always false as we don't support ro mode
 }
 
 type connectResponse struct {
@@ -156,6 +157,7 @@ type connectResponse struct {
 	TimeOut         int32
 	SessionID       int64
 	Passwd          []byte
+	ReadOnly        bool
 }
 
 type CreateRequest struct {
