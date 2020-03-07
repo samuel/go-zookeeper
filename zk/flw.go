@@ -153,8 +153,8 @@ func FLWRuok(servers []string, timeout time.Duration) []bool {
 func FLWCons(servers []string, timeout time.Duration) ([]*ServerClients, bool) {
 	const (
 		zrAddr = `^ /((?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){3}(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?):(?:\d+))\[\d+\]`
-		zrPac  = `\(queued=(\d+),recved=(\d+),sent=(\d+),sid=(0x[A-Za-z0-9]+),lop=(\w+),est=(\d+),to=(\d+),`
-		zrSesh = `lcxid=(0x[A-Za-z0-9]+),lzxid=(0x[A-Za-z0-9]+),lresp=(\d+),llat=(\d+),minlat=(\d+),avglat=(\d+),maxlat=(\d+)\)`
+		zrPac  = `\(queued=(-?\d+),recved=(\d+),sent=(\d+)(,sid=(0x[A-Za-z0-9]+),lop=(\w+),est=(\d+),to=(\d+),`
+		zrSesh = `lcxid=(0x[A-Za-z0-9]+),lzxid=(0x[A-Za-z0-9]+),lresp=(\d+),llat=(\d+),minlat=(\d+),avglat=(\d+),maxlat=(\d+))?\)`
 	)
 
 	re, err := regexp.Compile(fmt.Sprintf("%v%v%v", zrAddr, zrPac, zrSesh))
@@ -197,19 +197,24 @@ func FLWCons(servers []string, timeout time.Duration) ([]*ServerClients, bool) {
 
 			match := m[0][1:]
 
+			var sid, est, timeout, lcxid, lzxid, lresp, llat, minlat, avglat, maxlat int64
+
 			queued, _ := strconv.ParseInt(match[1], 0, 64)
 			recvd, _ := strconv.ParseInt(match[2], 0, 64)
 			sent, _ := strconv.ParseInt(match[3], 0, 64)
-			sid, _ := strconv.ParseInt(match[4], 0, 64)
-			est, _ := strconv.ParseInt(match[6], 0, 64)
-			timeout, _ := strconv.ParseInt(match[7], 0, 32)
-			lcxid, _ := parseInt64(match[8])
-			lzxid, _ := parseInt64(match[9])
-			lresp, _ := strconv.ParseInt(match[10], 0, 64)
-			llat, _ := strconv.ParseInt(match[11], 0, 32)
-			minlat, _ := strconv.ParseInt(match[12], 0, 32)
-			avglat, _ := strconv.ParseInt(match[13], 0, 32)
-			maxlat, _ := strconv.ParseInt(match[14], 0, 32)
+
+			if len(match) > 4 {
+				sid, _ = strconv.ParseInt(match[5], 0, 64)
+				est, _ = strconv.ParseInt(match[7], 0, 64)
+				timeout, _ = strconv.ParseInt(match[8], 0, 32)
+				lcxid, _ = parseInt64(match[9])
+				lzxid, _ = parseInt64(match[10])
+				lresp, _ = strconv.ParseInt(match[11], 0, 64)
+				llat, _ = strconv.ParseInt(match[12], 0, 32)
+				minlat, _ = strconv.ParseInt(match[13], 0, 32)
+				avglat, _ = strconv.ParseInt(match[14], 0, 32)
+				maxlat, _ = strconv.ParseInt(match[15], 0, 32)
+			}
 
 			clients = append(clients, &ServerClient{
 				Queued:        queued,
@@ -223,10 +228,10 @@ func FLWCons(servers []string, timeout time.Duration) ([]*ServerClients, bool) {
 				MinLatency:    int32(minlat),
 				AvgLatency:    int32(avglat),
 				MaxLatency:    int32(maxlat),
-				Established:   time.Unix(est, 0),
-				LastResponse:  time.Unix(lresp, 0),
+				Established:   time.Unix(est/1000, est%1000),
+				LastResponse:  time.Unix(lresp/1000, lresp%1000),
 				Addr:          match[0],
-				LastOperation: match[5],
+				LastOperation: match[6],
 			})
 		}
 
