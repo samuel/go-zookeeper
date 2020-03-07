@@ -228,8 +228,8 @@ func FLWCons(servers []string, timeout time.Duration) ([]*ServerClients, bool) {
 				MinLatency:    int32(minlat),
 				AvgLatency:    int32(avglat),
 				MaxLatency:    int32(maxlat),
-				Established:   time.Unix(est/1000, est%1000),
-				LastResponse:  time.Unix(lresp/1000, lresp%1000),
+				Established:   time.Unix(est/1000, (est%1000)*1e6),
+				LastResponse:  time.Unix(lresp/1000, (lresp%1000)*1e6),
 				Addr:          match[0],
 				LastOperation: match[6],
 			})
