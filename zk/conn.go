@@ -105,6 +105,8 @@ type Conn struct {
 	debugCloseRecvLoop bool
 	debugReauthDone    chan struct{}
 
+	cleanupChan chan string
+
 	logger  Logger
 	logInfo bool // true if information messages are logged; false if only errors are logged
 
@@ -206,6 +208,7 @@ func Connect(servers []string, sessionTimeout time.Duration, options ...connOpti
 		logger:         DefaultLogger,
 		logInfo:        true, // default is true for backwards compatability
 		buf:            make([]byte, bufferSize),
+		cleanupChan:    make(chan string),
 	}
 
 	// Set provided options.
@@ -225,6 +228,12 @@ func Connect(servers []string, sessionTimeout time.Duration, options ...connOpti
 		conn.invalidateWatches(ErrClosing)
 		close(conn.eventChan)
 	}()
+
+	go func() {
+		conn.cleanLoop()
+		close(conn.cleanupChan)
+	}()
+
 	return conn, ec, nil
 }
 
@@ -1102,7 +1111,7 @@ func (c *Conn) CreateProtectedEphemeralSequential(path string, data []byte, acl 
 		case ErrConnectionClosed:
 			children, _, err := c.Children(rootPath)
 			if err != nil {
-				return "", err
+				return protectedPath, err
 			}
 			for _, p := range children {
 				parts := strings.Split(p, "/")
@@ -1115,10 +1124,10 @@ func (c *Conn) CreateProtectedEphemeralSequential(path string, data []byte, acl 
 		case nil:
 			return newPath, nil
 		default:
-			return "", err
+			return protectedPath, err
 		}
 	}
-	return "", err
+	return protectedPath, err
 }
 
 func (c *Conn) Delete(path string, version int32) error {
@@ -1275,4 +1284,52 @@ func (c *Conn) Server() string {
 	c.serverMu.Lock()
 	defer c.serverMu.Unlock()
 	return c.server
+}
+
+// cleanLoop cleans obsolete nodes, which were created, but after some erroneous behaviour (e.g. ErrConnectionClosed)
+// are left bound to the session, but the client is not aware of it anymore, since the error has been propagated up the call stack
+func (c *Conn) cleanLoop() {
+	for {
+		select {
+		case l := <-c.cleanupChan:
+			c.clean(l)
+		case <-c.shouldQuit:
+			return
+		}
+	}
+}
+
+// clean deletes the node if it still exists,
+// the input nodePath might not have sequence number at the end, so we have to check whether the prefix,
+// protected by guid, matches one of the children of the root path
+func (c *Conn) clean(nodePath string) {
+	parts := strings.Split(nodePath, "/")
+	rootPath := strings.Join(parts[:len(parts)-1], "/")
+	nodeName := parts[len(parts)-1]
+
+	for {
+		children, _, err := c.Children(rootPath)
+		if err != nil {
+			if err == ErrNoNode {
+				break
+			}
+			continue
+		}
+		exist := false
+		for _, p := range children {
+			if strings.HasPrefix(p, nodeName) {
+				exist = true
+				break
+			}
+		}
+
+		if exist {
+			if err := c.Delete(nodePath, -1); err != nil {
+				if err != ErrNoNode {
+					continue
+				}
+			}
+		}
+		break
+	}
 }
