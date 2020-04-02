@@ -55,3 +55,45 @@ func TestRecurringReAuthHang(t *testing.T) {
 
 	<-conn.debugReauthDone
 }
+
+func TestClean(t *testing.T) {
+	ts, err := StartTestCluster(t, 1, nil, logWriter{t: t, p: "[ZKERR] "})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ts.Stop()
+
+	zk, _, err := ts.ConnectAll()
+	if err != nil {
+		t.Fatalf("Connect returned error: %+v", err)
+	}
+	defer zk.Close()
+
+	acls := WorldACL(PermAll)
+	_, err = zk.Create("/cleanup", []byte{}, 0, acls)
+	if err != nil {
+		t.Fatalf("Create returned error: %v", err)
+	}
+
+	path, err := zk.CreateProtectedEphemeralSequential("/cleanup/lock-", []byte{}, acls)
+	if err != nil {
+		t.Fatalf("Create returned error: %v", err)
+	}
+
+	zk.cleanupChan <- path
+
+	exists, _, evCh, err := zk.ExistsW(path)
+	if exists {
+		select {
+		case ev := <-evCh:
+			if ev.Err != nil {
+				t.Fatalf("ExistW event returned with error %v", err)
+			}
+			if ev.Type != EventNodeDeleted {
+				t.Fatal("Wrong event received")
+			}
+		case <-time.After(1 * time.Second):
+			t.Fatal("Node is not cleared")
+		}
+	}
+}
