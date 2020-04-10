@@ -46,7 +46,7 @@ func (hp *DNSHostProvider) Init(servers []string) error {
 	}
 
 	if len(found) == 0 {
-		return fmt.Errorf("No hosts found for addresses %q", servers)
+		return fmt.Errorf("No hosts found for addresses %v", servers)
 	}
 
 	// Randomize the order of the servers to avoid creating hotspots

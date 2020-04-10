@@ -488,7 +488,9 @@ func (c *Conn) loop() {
 			c.invalidateWatches(err)
 		case err != nil && c.conn != nil:
 			c.logger.Printf("authentication failed: %s", err)
-			c.conn.Close()
+			if err := c.conn.Close(); err != nil {
+				c.logger.Printf("conn close: err=%v", err)
+			}
 		case err == nil:
 			if c.logInfo {
 				c.logger.Printf("authenticated: id=%d, timeout=%d", c.SessionID(), c.sessionTimeoutMs)
@@ -508,7 +510,9 @@ func (c *Conn) loop() {
 				if err != nil || c.logInfo {
 					c.logger.Printf("send loop terminated: err=%v", err)
 				}
-				c.conn.Close() // causes recv loop to EOF/exit
+				if err := c.conn.Close(); err != nil { // causes recv loop to EOF/exit
+					c.logger.Printf("conn close: err=%v", err)
+				}
 				wg.Done()
 			}()
 
@@ -784,7 +788,9 @@ func (c *Conn) sendData(req *request) error {
 	_, err = c.conn.Write(c.buf[:n+4])
 	if err != nil {
 		req.recvChan <- response{-1, err}
-		c.conn.Close()
+		if err := c.conn.Close(); err != nil {
+			c.logger.Printf("conn close: err=%v", err)
+		}
 		return err
 	}
 	if err := c.conn.SetWriteDeadline(time.Time{}); err != nil {
@@ -817,7 +823,9 @@ func (c *Conn) sendLoop() error {
 			}
 			_, err = c.conn.Write(c.buf[:n+4])
 			if err != nil {
-				c.conn.Close()
+				if err := c.conn.Close(); err != nil {
+					c.logger.Printf("conn close: err=%v", err)
+				}
 				return err
 			}
 			if err := c.conn.SetWriteDeadline(time.Time{}); err != nil {
