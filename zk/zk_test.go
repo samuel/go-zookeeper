@@ -98,6 +98,68 @@ func TestCreate(t *testing.T) {
 	}
 }
 
+func TestCreateTTL(t *testing.T) {
+	ts, err := StartTestCluster(t, 1, nil, logWriter{t: t, p: "[ZKERR] "})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ts.Stop()
+	zk, _, err := ts.ConnectAll()
+	if err != nil {
+		t.Fatalf("Connect returned error: %+v", err)
+	}
+	defer zk.Close()
+
+	path := "/gozk-test"
+
+	if err := zk.Delete(path, -1); err != nil && err != ErrNoNode {
+		t.Fatalf("Delete returned error: %+v", err)
+	}
+	if p, err := zk.CreateTTL(path, []byte{1, 2, 3, 4}, 0, WorldACL(PermAll), 60*1000); err != nil {
+		t.Fatalf("Create returned error: %+v", err)
+	} else if p != path {
+		t.Fatalf("Create returned different path '%s' != '%s'", p, path)
+	}
+	if data, stat, err := zk.Get(path); err != nil {
+		t.Fatalf("Get returned error: %+v", err)
+	} else if stat == nil {
+		t.Fatal("Get returned nil stat")
+	} else if len(data) < 4 {
+		t.Fatal("Get returned wrong size data")
+	}
+}
+
+func TestCreateContainer(t *testing.T) {
+	ts, err := StartTestCluster(t, 1, nil, logWriter{t: t, p: "[ZKERR] "})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ts.Stop()
+	zk, _, err := ts.ConnectAll()
+	if err != nil {
+		t.Fatalf("Connect returned error: %+v", err)
+	}
+	defer zk.Close()
+
+	path := "/gozk-test"
+
+	if err := zk.Delete(path, -1); err != nil && err != ErrNoNode {
+		t.Fatalf("Delete returned error: %+v", err)
+	}
+	if p, err := zk.CreateContainer(path, []byte{1, 2, 3, 4}, 0, WorldACL(PermAll)); err != nil {
+		t.Fatalf("Create returned error: %+v", err)
+	} else if p != path {
+		t.Fatalf("Create returned different path '%s' != '%s'", p, path)
+	}
+	if data, stat, err := zk.Get(path); err != nil {
+		t.Fatalf("Get returned error: %+v", err)
+	} else if stat == nil {
+		t.Fatal("Get returned nil stat")
+	} else if len(data) < 4 {
+		t.Fatal("Get returned wrong size data")
+	}
+}
+
 func TestIncrementalReconfig(t *testing.T) {
 	if val, ok := os.LookupEnv("zk_version"); ok {
 		if !strings.HasPrefix(val, "3.5") {
