@@ -64,7 +64,7 @@ func (l *Lock) Lock() error {
 				if err != nil {
 					return err
 				}
-				if exists {
+				if exists == true {
 					continue
 				}
 				_, err = l.c.Create(pth, []byte{}, 0, l.acl)

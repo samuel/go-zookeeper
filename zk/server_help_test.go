@@ -222,14 +222,14 @@ func (tc *TestCluster) StartAllServers() error {
 }
 
 func (tc *TestCluster) StopAllServers() error {
-	var err2 error
+	var err error
 	for _, s := range tc.Servers {
 		if err := s.Srv.Stop(); err != nil {
-			err2 = fmt.Errorf("failed to stop server listening on port `%d` : %v", s.Port, err)
+			err = fmt.Errorf("failed to stop server listening on port `%d` : %v", s.Port, err)
 		}
 	}
-	if err2 != nil {
-		return err2
+	if err != nil {
+		return err
 	}
 
 	if err := tc.waitForStop(5, time.Second); err != nil {

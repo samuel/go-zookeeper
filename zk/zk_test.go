@@ -18,7 +18,6 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
-	"log"
 )
 
 func TestStateChanges(t *testing.T) {
@@ -35,7 +34,7 @@ func TestStateChanges(t *testing.T) {
 
 	zk, eventChan, err := ts.ConnectWithOptions(15*time.Second, WithEventCallback(f))
 	if err != nil {
-		log.Printf("Connect returned error: %+v", err)
+		t.Fatalf("Connect returned error: %+v", err)
 	}
 
 	verifyEventOrder := func(c <-chan Event, expectedStates []State, source string) {
@@ -1065,7 +1064,7 @@ func startSlowProxy(t *testing.T, up, down Rate, upstream string, adj func(ln *L
 			cn, err := tln.Accept()
 			if err != nil {
 				if !strings.Contains(err.Error(), "use of closed network connection") {
-					log.Printf("Accept failed: %s", err.Error())
+					t.Fatalf("Accept failed: %s", err.Error())
 				}
 				return
 			}
@@ -1088,13 +1087,13 @@ func startSlowProxy(t *testing.T, up, down Rate, upstream string, adj func(ln *L
 				go func() {
 					if _, err := io.Copy(upcn, cn); err != nil {
 						if !strings.Contains(err.Error(), "use of closed network connection") {
-							log.Printf("Upstream write failed: %s", err.Error())
+							// log.Printf("Upstream write failed: %s", err.Error())
 						}
 					}
 				}()
 				if _, err := io.Copy(cn, upcn); err != nil {
 					if !strings.Contains(err.Error(), "use of closed network connection") {
-						log.Printf("Upstream read failed: %s", err.Error())
+						// log.Printf("Upstream read failed: %s", err.Error())
 					}
 				}
 			}(cn)
