@@ -27,6 +27,8 @@ const (
 	opCheck        = 13
 	opMulti        = 14
 	opReconfig     = 16
+	opCreateContainer	= 19
+	opCreateTTL	= 21
 	opClose        = -11
 	opSetAuth      = 100
 	opSetWatches   = 101
@@ -72,6 +74,10 @@ const (
 const (
 	FlagEphemeral = 1
 	FlagSequence  = 2
+	FlagEphemeralSequence = 3
+	FlagContainer = 4
+	FlagWithTTL = 5
+	FlagSequenceWithTTL = 6
 )
 
 var (
@@ -193,6 +199,8 @@ var (
 	opNames       = map[int32]string{
 		opNotify:       "notify",
 		opCreate:       "create",
+		opCreateContainer:  "createContainer",
+		opCreateTTL:    "createTTL",
 		opDelete:       "delete",
 		opExists:       "exists",
 		opGetData:      "getData",

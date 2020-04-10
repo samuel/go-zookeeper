@@ -1072,6 +1072,33 @@ func (c *Conn) Create(path string, data []byte, flags int32, acl []ACL) (string,
 	return res.Path, err
 }
 
+func (c *Conn) CreateContainer(path string, data []byte, flags int32, acl []ACL) (string, error) {
+	if err := validatePath(path, flags&FlagSequence == FlagSequence); err != nil {
+		return "", err
+	}
+	if flags != FlagContainer {
+		return "", errors.New("flags not support container node")
+	}
+
+	res := &createResponse{}
+	_, err := c.request(opCreateContainer, &CreateContainerRequest{path, data, acl, flags}, res, nil)
+	return res.Path, err
+}
+
+// ttl: ms
+func (c *Conn) CreateTTL(path string, data []byte, flags int32, acl []ACL, ttl int64) (string, error) {
+	if err := validatePath(path, flags&FlagSequence == FlagSequence); err != nil {
+		return "", err
+	}
+	if flags != FlagWithTTL && flags != FlagSequenceWithTTL {
+		return "", errors.New("flags not support ttl node")
+	}
+
+	res := &createResponse{}
+	_, err := c.request(opCreateTTL, &CreateTTLRequest{path, data, acl, flags, ttl}, res, nil)
+	return res.Path, err
+}
+
 // CreateProtectedEphemeralSequential fixes a race condition if the server crashes
 // after it creates the node. On reconnect the session may still be valid so the
 // ephemeral node still exists. Therefore, on reconnect we need to check if a node
@@ -1218,6 +1245,10 @@ func (c *Conn) Multi(ops ...interface{}) ([]MultiResponse, error) {
 		switch op.(type) {
 		case *CreateRequest:
 			opCode = opCreate
+		case *CreateContainerRequest:
+			opCode = opCreateContainer
+		case *CreateTTLRequest:
+			opCode = opCreateTTL
 		case *SetDataRequest:
 			opCode = opSetData
 		case *DeleteRequest:

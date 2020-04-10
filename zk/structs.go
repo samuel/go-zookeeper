@@ -165,6 +165,16 @@ type CreateRequest struct {
 	Flags int32
 }
 
+type CreateContainerRequest CreateRequest
+
+type CreateTTLRequest struct {
+	Path  string
+	Data  []byte
+	Acl   []ACL
+	Flags int32
+	Ttl int64
+}
+
 type createResponse pathResponse
 type DeleteRequest PathVersionRequest
 type deleteResponse struct{}
@@ -365,7 +375,7 @@ func (r *multiResponse) Decode(buf []byte) (int, error) {
 			return total, ErrAPIError
 		case opError:
 			w = reflect.ValueOf(&res.Err)
-		case opCreate:
+		case opCreate, opCreateContainer, opCreateTTL:
 			w = reflect.ValueOf(&res.String)
 		case opSetData:
 			res.Stat = new(Stat)
@@ -589,6 +599,10 @@ func requestStructForOp(op int32) interface{} {
 		return &closeRequest{}
 	case opCreate:
 		return &CreateRequest{}
+	case opCreateContainer:
+		return &CreateContainerRequest{}
+	case opCreateTTL:
+		return &CreateTTLRequest{}
 	case opDelete:
 		return &DeleteRequest{}
 	case opExists:
