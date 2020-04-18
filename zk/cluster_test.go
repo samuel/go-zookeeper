@@ -17,17 +17,17 @@ func (lw logWriter) Write(b []byte) (int, error) {
 }
 
 func TestBasicCluster(t *testing.T) {
-	ts, err := StartTestCluster(3, nil, logWriter{t: t, p: "[ZKERR] "})
+	ts, err := StartTestCluster(t, 3, nil, logWriter{t: t, p: "[ZKERR] "})
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer ts.Stop()
-	zk1, err := ts.Connect(0)
+	zk1, _, err := ts.Connect(0)
 	if err != nil {
 		t.Fatalf("Connect returned error: %+v", err)
 	}
 	defer zk1.Close()
-	zk2, err := ts.Connect(1)
+	zk2, _, err := ts.Connect(1)
 	if err != nil {
 		t.Fatalf("Connect returned error: %+v", err)
 	}
@@ -38,6 +38,7 @@ func TestBasicCluster(t *testing.T) {
 	if _, err := zk1.Create("/gozk-test", []byte("foo-cluster"), 0, WorldACL(PermAll)); err != nil {
 		t.Fatalf("Create failed on node 1: %+v", err)
 	}
+
 	if by, _, err := zk2.Get("/gozk-test"); err != nil {
 		t.Fatalf("Get failed on node 2: %+v", err)
 	} else if string(by) != "foo-cluster" {
@@ -47,7 +48,7 @@ func TestBasicCluster(t *testing.T) {
 
 // If the current leader dies, then the session is reestablished with the new one.
 func TestClientClusterFailover(t *testing.T) {
-	tc, err := StartTestCluster(3, nil, logWriter{t: t, p: "[ZKERR] "})
+	tc, err := StartTestCluster(t, 3, nil, logWriter{t: t, p: "[ZKERR] "})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -89,7 +90,7 @@ func TestClientClusterFailover(t *testing.T) {
 // If a ZooKeeper cluster looses quorum then a session is reconnected as soon
 // as the quorum is restored.
 func TestNoQuorum(t *testing.T) {
-	tc, err := StartTestCluster(3, nil, logWriter{t: t, p: "[ZKERR] "})
+	tc, err := StartTestCluster(t, 3, nil, logWriter{t: t, p: "[ZKERR] "})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -149,7 +150,7 @@ func TestNoQuorum(t *testing.T) {
 	DefaultLogger.Printf("    Retrying no luck...")
 	var firstDisconnect *Event
 	begin := time.Now()
-	for time.Now().Sub(begin) < 6*time.Second {
+	for time.Since(begin) < 6*time.Second {
 		disconnectedEvent := sl.NewWatcher(sessionStateMatcher(StateDisconnected)).Wait(4 * time.Second)
 		if disconnectedEvent == nil {
 			t.Fatalf("Disconnected event expected")
@@ -185,12 +186,12 @@ func TestNoQuorum(t *testing.T) {
 }
 
 func TestWaitForClose(t *testing.T) {
-	ts, err := StartTestCluster(1, nil, logWriter{t: t, p: "[ZKERR] "})
+	ts, err := StartTestCluster(t, 1, nil, logWriter{t: t, p: "[ZKERR] "})
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer ts.Stop()
-	zk, err := ts.Connect(0)
+	zk, _, err := ts.Connect(0)
 	if err != nil {
 		t.Fatalf("Connect returned error: %+v", err)
 	}
@@ -221,7 +222,7 @@ CONNECTED:
 }
 
 func TestBadSession(t *testing.T) {
-	ts, err := StartTestCluster(1, nil, logWriter{t: t, p: "[ZKERR] "})
+	ts, err := StartTestCluster(t, 1, nil, logWriter{t: t, p: "[ZKERR] "})
 	if err != nil {
 		t.Fatal(err)
 	}

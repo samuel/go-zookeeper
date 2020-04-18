@@ -16,7 +16,7 @@ func localhostLookupHost(host string) ([]string, error) {
 // TestDNSHostProviderCreate is just like TestCreate, but with an
 // overridden HostProvider that ignores the provided hostname.
 func TestDNSHostProviderCreate(t *testing.T) {
-	ts, err := StartTestCluster(1, nil, logWriter{t: t, p: "[ZKERR] "})
+	ts, err := StartTestCluster(t, 1, nil, logWriter{t: t, p: "[ZKERR] "})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -97,7 +97,7 @@ var _ HostProvider = &localHostPortsFacade{}
 // remaps addresses to localhost:$PORT combinations corresponding to
 // the test ZooKeeper instances.
 func TestDNSHostProviderReconnect(t *testing.T) {
-	ts, err := StartTestCluster(3, nil, logWriter{t: t, p: "[ZKERR] "})
+	ts, err := StartTestCluster(t, 3, nil, logWriter{t: t, p: "[ZKERR] "})
 	if err != nil {
 		t.Fatal(err)
 	}
