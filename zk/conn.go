@@ -183,7 +183,7 @@ func Connect(servers []string, sessionTimeout time.Duration, options ...connOpti
 		if strings.Contains(addr, ":") {
 			srvs[i] = addr
 		} else {
-			srvs[i] = addr + ":" + strconv.Itoa(DefaultPort)
+			srvs[i] = net.JoinHostPort(addr, strconv.Itoa(DefaultPort))
 		}
 	}
 
