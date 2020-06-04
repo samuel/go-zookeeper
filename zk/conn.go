@@ -1138,8 +1138,10 @@ func (c *Conn) Exists(path string) (bool, *Stat, error) {
 	res := &existsResponse{}
 	_, err := c.request(opExists, &existsRequest{Path: path, Watch: false}, res, nil)
 	exists := true
-	if err == ErrNoNode {
+	if err != nil {
 		exists = false
+	}
+	if err == ErrNoNode {
 		err = nil
 	}
 	return exists, &res.Stat, err
