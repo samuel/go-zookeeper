@@ -188,7 +188,7 @@ func Connect(servers []string, sessionTimeout time.Duration, options ...connOpti
 	}
 
 	// Randomize the order of the servers to avoid creating hotspots
-	stringShuffle(srvs)
+	srvs = stringShuffle(srvs)
 
 	ec := make(chan Event, eventChanSize)
 	conn := &Conn{
