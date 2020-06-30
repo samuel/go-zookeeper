@@ -2,9 +2,8 @@ package main
 
 import (
 	"fmt"
-	"time"
-
 	"github.com/go-zk/zk"
+	"time"
 )
 
 func main() {
