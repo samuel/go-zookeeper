@@ -70,8 +70,9 @@ const (
 )
 
 const (
-	FlagEphemeral = 1
-	FlagSequence  = 2
+	FlagPersistence = 0
+	FlagEphemeral   = 1
+	FlagSequence    = 2
 )
 
 var (
