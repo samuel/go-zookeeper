@@ -9,3 +9,8 @@ License
 -------
 
 3-clause BSD. See LICENSE file.
+
+This Repository is No Longer Maintained
+=======================================
+
+Please use https://github.com/go-zookeeper/zk for an actively maintained fork.
