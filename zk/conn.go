@@ -965,8 +965,12 @@ func (c *Conn) queueRequest(opcode int32, req interface{}, res interface{}, recv
 }
 
 func (c *Conn) request(opcode int32, req interface{}, res interface{}, recvFunc func(*request, *responseHeader, error)) (int64, error) {
-	r := <-c.queueRequest(opcode, req, res, recvFunc)
-	return r.zxid, r.err
+	select {
+	case <-c.shouldQuit:
+		return 0, ErrConnectionClosed
+	case r := <-c.queueRequest(opcode, req, res, recvFunc):
+		return r.zxid, r.err
+	}
 }
 
 func (c *Conn) AddAuth(scheme string, auth []byte) error {
