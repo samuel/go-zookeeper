@@ -11,6 +11,7 @@ Possible watcher events:
 
 import (
 	"crypto/rand"
+	"crypto/tls"
 	"encoding/binary"
 	"errors"
 	"fmt"
@@ -108,7 +109,9 @@ type Conn struct {
 	logger  Logger
 	logInfo bool // true if information messages are logged; false if only errors are logged
 
-	buf []byte
+	buf       []byte
+	configTLS *tls.Config
+	enableTLS bool
 }
 
 // connOption represents a connection option.
@@ -166,6 +169,26 @@ func ConnectWithDialer(servers []string, sessionTimeout time.Duration, dialer Di
 	return Connect(servers, sessionTimeout, WithDialer(dialer))
 }
 
+func ConnectTLS(servers []string, sessionTimeout time.Duration, config *tls.Config, options ...connOption) (*Conn, <-chan Event, error) {
+	srvs, e := prepareServerArray(servers)
+	if e != nil {
+		return nil, nil, e
+	}
+
+	ec, conn, e := prepareConn(options, srvs, sessionTimeout, true, config)
+	if e != nil {
+		return nil, nil, e
+	}
+
+	go func() {
+		conn.loop()
+		conn.flushRequests(ErrClosing)
+		conn.invalidateWatches(ErrClosing)
+		close(conn.eventChan)
+	}()
+	return conn, ec, nil
+}
+
 // Connect establishes a new connection to a pool of zookeeper
 // servers. The provided session timeout sets the amount of time for which
 // a session is considered valid after losing connection to a server. Within
@@ -173,23 +196,26 @@ func ConnectWithDialer(servers []string, sessionTimeout time.Duration, dialer Di
 // server and keep the same session. This is means any ephemeral nodes and
 // watches are maintained.
 func Connect(servers []string, sessionTimeout time.Duration, options ...connOption) (*Conn, <-chan Event, error) {
-	if len(servers) == 0 {
-		return nil, nil, errors.New("zk: server list must not be empty")
+	srvs, e := prepareServerArray(servers)
+	if e != nil {
+		return nil, nil, e
 	}
 
-	srvs := make([]string, len(servers))
-
-	for i, addr := range servers {
-		if strings.Contains(addr, ":") {
-			srvs[i] = addr
-		} else {
-			srvs[i] = addr + ":" + strconv.Itoa(DefaultPort)
-		}
+	ec, conn, e := prepareConn(options, srvs, sessionTimeout, false, nil)
+	if e != nil {
+		return nil, nil, e
 	}
 
-	// Randomize the order of the servers to avoid creating hotspots
-	stringShuffle(srvs)
+	go func() {
+		conn.loop()
+		conn.flushRequests(ErrClosing)
+		conn.invalidateWatches(ErrClosing)
+		close(conn.eventChan)
+	}()
+	return conn, ec, nil
+}
 
+func prepareConn(options []connOption, srvs []string, sessionTimeout time.Duration, tlsEnabled bool, config *tls.Config) (chan Event, *Conn, error) {
 	ec := make(chan Event, eventChanSize)
 	conn := &Conn{
 		dialer:         net.DialTimeout,
@@ -206,26 +232,35 @@ func Connect(servers []string, sessionTimeout time.Duration, options ...connOpti
 		logger:         DefaultLogger,
 		logInfo:        true, // default is true for backwards compatability
 		buf:            make([]byte, bufferSize),
+		enableTLS:      tlsEnabled,
+		configTLS:      config,
 	}
-
 	// Set provided options.
 	for _, option := range options {
 		option(conn)
 	}
-
 	if err := conn.hostProvider.Init(srvs); err != nil {
 		return nil, nil, err
 	}
-
 	conn.setTimeouts(int32(sessionTimeout / time.Millisecond))
+	return ec, conn, nil
+}
 
-	go func() {
-		conn.loop()
-		conn.flushRequests(ErrClosing)
-		conn.invalidateWatches(ErrClosing)
-		close(conn.eventChan)
-	}()
-	return conn, ec, nil
+func prepareServerArray(servers []string) ([]string, error) {
+	if len(servers) == 0 {
+		return nil, errors.New("zk: server list must not be empty")
+	}
+	srvs := make([]string, len(servers))
+	for i, addr := range servers {
+		if strings.Contains(addr, ":") {
+			srvs[i] = addr
+		} else {
+			srvs[i] = addr + ":" + strconv.Itoa(DefaultPort)
+		}
+	}
+	// Randomize the order of the servers to avoid creating hotspots
+	stringShuffle(srvs)
+	return srvs, nil
 }
 
 // WithDialer returns a connection option specifying a non-default Dialer.
@@ -377,17 +412,31 @@ func (c *Conn) connect() error {
 			}
 		}
 
-		zkConn, err := c.dialer("tcp", c.Server(), c.connectTimeout)
-		if err == nil {
-			c.conn = zkConn
-			c.setState(StateConnected)
-			if c.logInfo {
-				c.logger.Printf("Connected to %s", c.Server())
+		if c.enableTLS {
+			dialer := net.Dialer{Timeout: c.connectTimeout}
+			zkConn, zkConnErr := tls.DialWithDialer(&dialer, "tcp", c.Server(), c.configTLS)
+			if zkConnErr == nil {
+				c.conn = zkConn
+				c.setState(StateConnected)
+				if c.logInfo {
+					c.logger.Printf("Connected to %s", c.Server())
+				}
+				return nil
 			}
-			return nil
+			c.logger.Printf("Failed to connect to %s: %+v", c.Server(), zkConnErr)
+		} else {
+			zkConn, zkConnErr := c.dialer("tcp", c.Server(), c.connectTimeout)
+			if zkConnErr == nil {
+				c.conn = zkConn
+				c.setState(StateConnected)
+				if c.logInfo {
+					c.logger.Printf("Connected to %s", c.Server())
+				}
+				return nil
+			}
+			c.logger.Printf("Failed to connect to %s: %+v", c.Server(), zkConnErr)
 		}
 
-		c.logger.Printf("Failed to connect to %s: %+v", c.Server(), err)
 	}
 }
 
@@ -867,7 +916,8 @@ func (c *Conn) recvLoop(conn net.Conn) error {
 			return err
 		}
 
-		if res.Xid == -1 {
+		switch {
+		case res.Xid == -1:
 			res := &watcherEvent{}
 			_, err := decodePacket(buf[16:blen], res)
 			if err != nil {
@@ -901,11 +951,11 @@ func (c *Conn) recvLoop(conn net.Conn) error {
 				}
 			}
 			c.watchersLock.Unlock()
-		} else if res.Xid == -2 {
+		case res.Xid == -2:
 			// Ping response. Ignore.
-		} else if res.Xid < 0 {
+		case res.Xid < 0:
 			c.logger.Printf("Xid < 0 (%d) but not ping or watcher event", res.Xid)
-		} else {
+		default:
 			if res.Zxid > 0 {
 				c.lastZxid = res.Zxid
 			}
