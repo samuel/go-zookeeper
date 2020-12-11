@@ -38,7 +38,8 @@ func (hp *DNSHostProvider) Init(servers []string) error {
 		}
 		addrs, err := lookupHost(host)
 		if err != nil {
-			return err
+			// If one node is down, Init should still continue
+			continue
 		}
 		for _, addr := range addrs {
 			found = append(found, net.JoinHostPort(addr, port))
