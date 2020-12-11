@@ -93,3 +93,127 @@ func TestMultiLevelLock(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+// This tests whether locking contention does not result into deadlock in case of network partition failure
+// this is simulated by cleaning lock_path attribute from lock object
+func TestLockExists(t *testing.T) {
+	ts, err := StartTestCluster(t, 1, nil, logWriter{t: t, p: "[ZKERR] "})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ts.Stop()
+
+	zk, _, err := ts.ConnectAll()
+	if err != nil {
+		t.Fatalf("Connect returned error: %+v", err)
+	}
+	defer zk.Close()
+
+	acls := WorldACL(PermAll)
+
+	l := NewLock(zk, "/test", acls)
+	if err := l.Lock(); err != nil {
+		t.Fatal(err)
+	}
+
+	//clean off lockPath
+	l.lockPath = ""
+
+	// try to acquire lock
+	if err := l.Lock(); err != nil {
+		t.Fatal(err)
+	}
+
+	//try to release the lock
+	if err := l.Unlock(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// This tests whether lock path is populated correctly when lock is acquired
+func TestLockPathExists(t *testing.T) {
+	ts, err := StartTestCluster(t, 1, nil, logWriter{t: t, p: "[ZKERR] "})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ts.Stop()
+
+	zk, _, err := ts.ConnectAll()
+	if err != nil {
+		t.Fatalf("Connect returned error: %+v", err)
+	}
+	defer zk.Close()
+
+	acls := WorldACL(PermAll)
+
+	l := NewLock(zk, "/test", acls)
+	if err := l.Lock(); err != nil {
+		t.Fatal(err)
+	}
+
+	// Create test data set
+	type args struct {
+		c         *Conn
+		rootPath  string
+		znodePath string
+	}
+	tests := []struct {
+		name string
+		args args
+		want bool
+	}{
+		{"lock_path_populated_success", args{
+			zk,
+			"/test",
+			l.attemptedLockPath,
+		},
+			true,
+		},
+		{"lock_path_populated_failure", args{
+			zk,
+			"/test_no_lock",
+			l.attemptedLockPath,
+		},
+			false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := lockExists(tt.args.c, tt.args.rootPath, tt.args.znodePath); got != tt.want {
+				t.Errorf("TestLockPathExists() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+
+	if err := l.Unlock(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// This tests whether lock path is cleaned off correctly when lock is acquired
+func TestLockPathCleaning(t *testing.T) {
+	ts, err := StartTestCluster(t, 1, nil, logWriter{t: t, p: "[ZKERR] "})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ts.Stop()
+
+	zk, _, err := ts.ConnectAll()
+	if err != nil {
+		t.Fatalf("Connect returned error: %+v", err)
+	}
+	defer zk.Close()
+
+	acls := WorldACL(PermAll)
+
+	l := NewLock(zk, "/test", acls)
+	if err := l.Lock(); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := l.Unlock(); err != nil {
+		t.Fatal(err)
+	}
+
+}
