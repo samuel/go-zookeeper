@@ -712,6 +712,15 @@ func (c *Conn) authenticate() error {
 	}
 	_, err = io.ReadFull(c.conn, buf[:4])
 	if err != nil {
+		// Fix Bug for zookeeper old client
+		if err == io.EOF {
+			atomic.StoreInt64(&c.sessionID, int64(0))
+			c.passwd = emptyPassword
+			c.lastZxid = 0
+			c.setState(StateExpired)
+			return ErrSessionExpired
+		}
+
 		return err
 	}
 	if err := c.conn.SetReadDeadline(time.Time{}); err != nil {
