@@ -15,6 +15,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"net"
 	"strconv"
 	"strings"
@@ -1119,6 +1120,39 @@ func (c *Conn) CreateProtectedEphemeralSequential(path string, data []byte, acl 
 		}
 	}
 	return "", err
+}
+
+//If there is no parent node, the node is created level by level
+func (c *Conn) CreatingParentsIfNeededWithDefaultACL(path string, data []byte, flags int32) (string, error) {
+	return c.CreatingParentsIfNeededWithCustomizeACL(path, data, flags, WorldACL(PermAll))
+}
+
+func (c *Conn) CreatingParentsIfNeededWithCustomizeACL(path string, data []byte, flags int32, acl []ACL) (string, error) {
+	var zkPath string
+
+	if path == "" {
+		return zkPath, ErrInvalidPath
+	}
+
+	paths := strings.Split(path, "/")
+
+	size := len(paths)
+
+	for index, node := range paths {
+		log.Println("size: ", size, ", index: ", index, ", node: ", node)
+		if node == "" {
+			continue
+		}
+		zkPath = zkPath + "/" + node
+		if index < size-1 {
+			zkPath, _ := c.Create(zkPath, []byte(""), FlagPersistence, acl)
+			log.Println("index = ", index, "zkPath = ", zkPath)
+		} else {
+			zkPath, _ = c.Create(zkPath, data, flags, acl)
+			log.Println("index = ", index, "zkPath = ", zkPath)
+		}
+	}
+	return zkPath, nil
 }
 
 func (c *Conn) Delete(path string, version int32) error {
