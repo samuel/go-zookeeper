@@ -24,7 +24,7 @@ func FLWSrvr(servers []string, timeout time.Duration) ([]*ServerStats, bool) {
 	// different parts of the regular expression that are required to parse the srvr output
 	const (
 		zrVer   = `^Zookeeper version: ([A-Za-z0-9\.\-]+), built on (\d\d/\d\d/\d\d\d\d \d\d:\d\d [A-Za-z0-9:\+\-]+)`
-		zrLat   = `^Latency min/avg/max: (\d+)/(\d+)/(\d+)`
+		zrLat   = `^Latency min/avg/max: (\d+(\.\d+)?)/(\d+(\.\d+)?)/(\d+(\.\d+)?)`
 		zrNet   = `^Received: (\d+).*\n^Sent: (\d+).*\n^Connections: (\d+).*\n^Outstanding: (\d+)`
 		zrState = `^Zxid: (0x[A-Za-z0-9]+).*\n^Mode: (\w+).*\n^Node count: (\d+)`
 	)
