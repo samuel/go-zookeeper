@@ -50,7 +50,7 @@ func (hp *DNSHostProvider) Init(servers []string) error {
 	}
 
 	// Randomize the order of the servers to avoid creating hotspots
-	stringShuffle(found)
+	found = stringShuffle(found)
 
 	hp.servers = found
 	hp.curr = -1
