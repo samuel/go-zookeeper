@@ -12,6 +12,8 @@ var (
 	ErrDeadlock = errors.New("zk: trying to acquire a lock twice")
 	// ErrNotLocked is returned by Unlock when trying to release a lock that has not first be acquired.
 	ErrNotLocked = errors.New("zk: not locked")
+	// ErrLockFailed is returned when lock is owned by others and you don't want to wait.
+	ErrLockFailed = errors.New("zk: lock is hold by others")
 )
 
 // Lock is a mutual exclusion lock.
@@ -133,6 +135,89 @@ func (l *Lock) Lock() error {
 	l.seq = seq
 	l.lockPath = path
 	return nil
+}
+
+func (l *Lock) LockOrFail() error {
+	if l.lockPath != "" {
+		return ErrDeadlock
+	}
+	var err error
+	children, _, err := l.c.Children(l.path)
+
+	if len(children) >= 1{
+		return ErrLockFailed
+	}
+
+	prefix := fmt.Sprintf("%s/lock-", l.path)
+
+	path := ""
+
+	for i := 0; i < 3; i++ {
+		path, err = l.c.CreateProtectedEphemeralSequential(prefix, []byte{}, l.acl)
+		if err == ErrNoNode {
+			// Create parent node.
+			parts := strings.Split(l.path, "/")
+			pth := ""
+			for _, p := range parts[1:] {
+				var exists bool
+				pth += "/" + p
+				exists, _, err = l.c.Exists(pth)
+				if err != nil {
+					return err
+				}
+				if exists == true {
+					continue
+				}
+				_, err = l.c.Create(pth, []byte{}, 0, l.acl)
+				if err != nil && err != ErrNodeExists {
+					return err
+				}
+			}
+		} else if err == nil {
+			break
+		} else {
+			return err
+		}
+	}
+	if err != nil {
+		return err
+	}
+
+	seq, err := parseSeq(path)
+	if err != nil {
+		return err
+	}
+
+	children, _, err = l.c.Children(l.path)
+	if err != nil {
+		return err
+	}
+
+	lowestSeq := seq
+	for _, p := range children {
+		s, err := parseSeq(p)
+		if err != nil {
+			return err
+		}
+		if s < lowestSeq {
+			lowestSeq = s
+		}
+
+	}
+
+	if seq == lowestSeq {
+		// Acquired the lock
+		l.seq = seq
+		l.lockPath = path
+		return nil
+	}else{
+		if err := l.c.Delete(path, -1); err != nil {
+			return err
+		}
+		l.lockPath = ""
+		l.seq = 0
+		return ErrLockFailed
+	}
 }
 
 // Unlock releases an acquired lock. If the lock is not currently acquired by
