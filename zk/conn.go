@@ -183,7 +183,7 @@ func Connect(servers []string, sessionTimeout time.Duration, options ...connOpti
 		if strings.Contains(addr, ":") {
 			srvs[i] = addr
 		} else {
-			srvs[i] = addr + ":" + strconv.Itoa(DefaultPort)
+			srvs[i] = net.JoinHostPort(addr, strconv.Itoa(DefaultPort))
 		}
 	}
 
@@ -223,6 +223,7 @@ func Connect(servers []string, sessionTimeout time.Duration, options ...connOpti
 		conn.loop()
 		conn.flushRequests(ErrClosing)
 		conn.invalidateWatches(ErrClosing)
+		conn.flushUnsentRequests(ErrClosing)
 		close(conn.eventChan)
 	}()
 	return conn, ec, nil
@@ -486,6 +487,14 @@ func (c *Conn) loop() {
 		case err == ErrSessionExpired:
 			c.logger.Printf("authentication failed: %s", err)
 			c.invalidateWatches(err)
+			for {
+				select {
+				case <-c.shouldQuit:
+					return
+				case req := <-c.sendChan:
+					req.recvChan <- response{-1, err}
+				}
+			}
 		case err != nil && c.conn != nil:
 			c.logger.Printf("authentication failed: %s", err)
 			c.conn.Close()
